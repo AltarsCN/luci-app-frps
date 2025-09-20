@@ -1,0 +1,12 @@
+config frps
+	option bind_port '7000'
+	option vhost_http_port '80'
+	option vhost_https_port '443'
+	option token ''
+	option subdomain_host ''
+	option max_pool_count '5'
+	option log_file '/var/log/frps.log'
+	option log_level 'info'
+	option log_max_days '3'
+	option tcp_mux '1'
+	option enabled '0'
