@@ -191,14 +191,14 @@ return view.extend({
 		s.tab('logging', _('Logging'));
 		s.tab('additional', _('Additional'));
 		s.tab('init', _('Startup settings'));
-		defTabOpts(s, 'basic', grpBasic, {optional: true});
-		defTabOpts(s, 'ports_vhost', grpPortsVhost, {optional: true});
-		defTabOpts(s, 'dashboard', grpDashboard, {optional: true});
-		defTabOpts(s, 'auth', grpAuth, {optional: true});
-		defTabOpts(s, 'firewall', grpFirewallLimits, {optional: true});
-		defTabOpts(s, 'tls_pool', grpTlsPool, {optional: true});
-		defTabOpts(s, 'logging', grpLogging, {optional: true});
-		defTabOpts(s, 'additional', grpAdditional, {optional: true});
+		defTabOpts(s, 'basic', grpBasic);
+		defTabOpts(s, 'ports_vhost', grpPortsVhost);
+		defTabOpts(s, 'dashboard', grpDashboard);
+		defTabOpts(s, 'auth', grpAuth);
+		defTabOpts(s, 'firewall', grpFirewallLimits);
+		defTabOpts(s, 'tls_pool', grpTlsPool);
+		defTabOpts(s, 'logging', grpLogging);
+		defTabOpts(s, 'additional', grpAdditional);
 
 		o = s.taboption('init', form.SectionValue, 'init', form.TypedSection, 'init', _('Startup settings'));
 		s = o.subsection;
