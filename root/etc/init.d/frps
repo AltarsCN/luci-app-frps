@@ -217,6 +217,23 @@ reload_service() {
 	start
 }
 
+# qa_example: illustrative snippet of frps.toml (manual debug aid)
+qa_example() {
+	cat <<'EOF'
+# Example frps.toml snippet
+bindPort = 7000
+quicBindPort = 7000
+allowPorts = [
+  { start = 2000, end = 2005 },
+  { single = 8080 },
+]
+transport.tls.force = true
+webServer.port = 7500
+auth.method = "token"
+auth.token = "SECRET"
+EOF
+}
+
 # ---------------- Firewall helper (optional) ----------------
 # Behavior controlled by UCI keys in 'common' section:
 #   set_firewall: no|check|force (default: no)

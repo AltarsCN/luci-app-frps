@@ -15,42 +15,65 @@ var startupConf = [
 	[form.DynamicList, 'conf_inc', _('Additional configs'), _('Config files include in temporary config file'), {placeholder: '/etc/frp/frps.d/frps_full.ini'}]
 ];
 
-var commonConf = [
+// 分页拆分
+var grpBasic = [
 	[form.Value, 'bind_addr', _('Bind address'), _('BindAddr specifies the address that the server binds to.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}],
 	[form.Value, 'bind_port', _('Bind port'), _('BindPort specifies the port that the server listens on.<br />By default, this value is 7000.'), {datatype: 'port'}],
+	[form.Value, 'proxy_bind_addr', _('Proxy bind address'), _('ProxyBindAddr specifies the address that the proxy binds to. This value may be the same as BindAddr.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}]
+];
+
+var grpPortsVhost = [
 	[form.Value, 'bind_udp_port', _('UDP bind port'), _('BindUdpPort specifies the UDP port that the server listens on. If this value is 0, the server will not listen for UDP connections.<br />By default, this value is 0'), {datatype: 'port'}],
 	[form.Value, 'kcp_bind_port', _('KCP bind port'), _('BindKcpPort specifies the KCP port that the server listens on. If this value is 0, the server will not listen for KCP connections.<br />By default, this value is 0.'), {datatype: 'port'}],
-	// QUIC bind port support (frp quicBindPort)
 	[form.Value, 'quic_bind_port', _('QUIC bind port'), _('BindQuicPort specifies the QUIC (UDP) port that the server listens on. If this value is 0, the server will not listen for QUIC connections. It may reuse the same numeric value as bind_port because bind_port is TCP.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'proxy_bind_addr', _('Proxy bind address'), _('ProxyBindAddr specifies the address that the proxy binds to. This value may be the same as BindAddr.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}],
 	[form.Value, 'vhost_http_port', _('Vhost HTTP port'), _('VhostHttpPort specifies the port that the server listens for HTTP Vhost requests. If this value is 0, the server will not listen for HTTP requests.<br />By default, this value is 0.'), {datatype: 'port'}],
 	[form.Value, 'vhost_https_port', _('Vhost HTTPS port'), _('VhostHttpsPort specifies the port that the server listens for HTTPS Vhost requests. If this value is 0, the server will not listen for HTTPS requests.<br />By default, this value is 0.'), {datatype: 'port'}],
 	[form.Value, 'vhost_http_timeout', _('Vhost HTTP timeout'), _('VhostHttpTimeout specifies the response header timeout for the Vhost HTTP server, in seconds.<br />By default, this value is 60.'), {datatype: 'uinteger'}],
+	[form.Value, 'subdomain_host', _('Subdomain host'), _('SubDomainHost specifies the domain that will be attached to sub-domains requested by the client when using Vhost proxying. For example, if this value is set to "frps.com" and the client requested the subdomain "test", the resulting URL would be "test.frps.com".<br />By default, this value is "".')],
+	[form.Value, 'custom_404_page', _('Custom 404 page'), _('Custom404Page specifies a path to a custom 404 page to display. If this value is "", a default page will be displayed.<br />By default, this value is "".')]
+];
+
+var grpDashboard = [
 	[form.Value, 'dashboard_addr', _('Dashboard address'), _('DashboardAddr specifies the address that the dashboard binds to.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}],
 	[form.Value, 'dashboard_port', _('Dashboard port'), _('DashboardPort specifies the port that the dashboard listens on. If this value is 0, the dashboard will not be started.<br />By default, this value is 0.'), {datatype: 'port'}],
 	[form.Value, 'dashboard_user', _('Dashboard user'), _('DashboardUser specifies the username that the dashboard will use for login.<br />By default, this value is "admin".')],
 	[form.Value, 'dashboard_pwd', _('Dashboard password'), _('DashboardPwd specifies the password that the dashboard will use for login.<br />By default, this value is "admin".'), {password: true}],
-	[form.Value, 'assets_dir', _('Assets dir'), _('AssetsDir specifies the local directory that the dashboard will load resources from. If this value is "", assets will be loaded from the bundled executable using statik.<br />By default, this value is "".')],
-	[form.Value, 'log_file', _('Log file'), _('LogFile specifies a file where logs will be written to. This value will only be used if LogWay is set appropriately.<br />By default, this value is "console".')],
-	[form.ListValue, 'log_level', _('Log level'), _('LogLevel specifies the minimum log level. Valid values are "trace", "debug", "info", "warn", and "error".<br />By default, this value is "info".'), {values: ['trace', 'debug', 'info', 'warn', 'error']}],
-	[form.Value, 'log_max_days', _('Log max days'), _('LogMaxDays specifies the maximum number of days to store log information before deletion. This is only used if LogWay == "file".<br />By default, this value is 0.'), {datatype: 'uinteger'}],
-	[form.Flag, 'disable_log_color', _('Disable log color'), _('DisableLogColor disables log colors when LogWay == "console" when set to true.<br />By default, this value is false.'), {datatype: 'bool', default: 'true'}],
+	[form.Value, 'assets_dir', _('Assets dir'), _('AssetsDir specifies the local directory that the dashboard will load resources from. If this value is "", assets will be loaded from the bundled executable using statik.<br />By default, this value is "".')]
+];
+
+var grpAuth = [
 	[form.ListValue, 'auth_method', _('Auth method'), _('Authentication method for validating frpc. Valid values: "token" (default) or "oidc".'), {values: ['token', 'oidc'], default: 'token'}],
 	[form.Value, 'token', _('Token'), _('Token specifies the authorization token used to authenticate keys received from clients (auth.method=token).'), {depends: {auth_method: 'token'}}],
 	[form.Value, 'oidc_issuer', _('OIDC Issuer'), _('OIDC issuer URL (auth.method=oidc).'), {depends: {auth_method: 'oidc'}}],
-	[form.Value, 'oidc_audience', _('OIDC Audience'), _('OIDC audience (auth.method=oidc).'), {depends: {auth_method: 'oidc'}}],
-	[form.Value, 'subdomain_host', _('Subdomain host'), _('SubDomainHost specifies the domain that will be attached to sub-domains requested by the client when using Vhost proxying. For example, if this value is set to "frps.com" and the client requested the subdomain "test", the resulting URL would be "test.frps.com".<br />By default, this value is "".')],
-	[form.Flag, 'tcp_mux', _('TCP mux'), _('TcpMux toggles TCP stream multiplexing. This allows multiple requests from a client to share a single TCP connection.<br />By default, this value is true.'), {datatype: 'bool', default: 'true'}],
-	[form.Value, 'custom_404_page', _('Custom 404 page'), _('Custom404Page specifies a path to a custom 404 page to display. If this value is "", a default page will be displayed.<br />By default, this value is "".')],
+	[form.Value, 'oidc_audience', _('OIDC Audience'), _('OIDC audience (auth.method=oidc).'), {depends: {auth_method: 'oidc'}}]
+];
+
+var grpTcpMux = [
+	[form.Flag, 'tcp_mux', _('TCP mux'), _('TcpMux toggles TCP stream multiplexing. This allows multiple requests from a client to share a single TCP connection.<br />By default, this value is true.'), {datatype: 'bool', default: 'true'}]
+];
+
+var grpFirewallLimits = [
 	[form.DynamicList, 'allow_ports', _('Allow ports / ranges'), _('List of allowed ports or ranges (e.g. "2000-2005", "8080"). Empty list means no restriction.')],
-	// Firewall auto rule management
 	[form.ListValue, 'set_firewall', _('Firewall auto mode'), _('Automatically create/delete firewall rules for selected ports. Modes: no (do nothing), check (update when changed), force (always recreate on start & delete on stop).'), {values: ['no','check','force'], default: 'no'}],
 	[form.Value, 'tcp_ports', _('Firewall TCP ports'), _('Comma/space separated single ports or ranges, applied when firewall auto mode is not "no".')],
 	[form.Value, 'udp_ports', _('Firewall UDP ports'), _('Comma/space separated single ports or ranges, applied when firewall auto mode is not "no".')],
-	[form.Value, 'max_ports_per_client', _('Max ports per client'), _('MaxPortsPerClient specifies the maximum number of ports a single client may proxy to. If this value is 0, no limit will be applied.<br />By default, this value is 0.'), {datatype: 'uinteger'}],
-	[form.Value, 'max_pool_count', _('Max pool count'), _('transport.maxPoolCount limits number of pooled connections.'), {datatype: 'uinteger'}],
+	[form.Value, 'max_ports_per_client', _('Max ports per client'), _('MaxPortsPerClient specifies the maximum number of ports a single client may proxy to. If this value is 0, no limit will be applied.<br />By default, this value is 0.'), {datatype: 'uinteger'}]
+];
+
+var grpTlsPool = [
 	[form.Flag, 'tls_force', _('TLS force'), _('Force all connections to use TLS (transport.tls.force).'), {datatype: 'bool'}],
-	[form.Value, 'heartbeat_timeout', _('Heartbeat timeout'), _('HeartBeatTimeout specifies the maximum time to wait for a heartbeat before terminating the connection. It is not recommended to change this value.<br />By default, this value is 90.'), {datatype: 'uinteger'}],
+	[form.Value, 'max_pool_count', _('Max pool count'), _('transport.maxPoolCount limits number of pooled connections.'), {datatype: 'uinteger'}],
+    [form.Value, 'heartbeat_timeout', _('Heartbeat timeout'), _('HeartBeatTimeout specifies the maximum time to wait for a heartbeat before terminating the connection. It is not recommended to change this value.<br />By default, this value is 90.'), {datatype: 'uinteger'}]
+];
+
+var grpLogging = [
+	[form.Value, 'log_file', _('Log file'), _('LogFile specifies a file where logs will be written to. This value will only be used if LogWay is set appropriately.<br />By default, this value is "console".')],
+	[form.ListValue, 'log_level', _('Log level'), _('LogLevel specifies the minimum log level. Valid values are "trace", "debug", "info", "warn", and "error".<br />By default, this value is "info".'), {values: ['trace', 'debug', 'info', 'warn', 'error']}],
+	[form.Value, 'log_max_days', _('Log max days'), _('LogMaxDays specifies the maximum number of days to store log information before deletion. This is only used if LogWay == "file".<br />By default, this value is 0.'), {datatype: 'uinteger'}],
+	[form.Flag, 'disable_log_color', _('Disable log color'), _('DisableLogColor disables log colors when LogWay == "console" when set to true.<br />By default, this value is false.'), {datatype: 'bool', default: 'true'}]
+];
+
+var grpAdditional = [
 	[form.DynamicList, '_', _('Additional settings'), _('This list can be used to specify some additional parameters which have not been included in this LuCI.'), {placeholder: 'Key-A=Value-A'}]
 ];
 
@@ -159,10 +182,23 @@ return view.extend({
 		s = m.section(form.NamedSection, 'common', 'conf');
 		s.dynamic = true;
 
-		s.tab('common', _('Common settings'));
+		s.tab('basic', _('Basic'));
+		s.tab('ports_vhost', _('Ports & VHost'));
+		s.tab('dashboard', _('Dashboard'));
+		s.tab('auth', _('Authentication'));
+		s.tab('firewall', _('Firewall & Limits'));
+		s.tab('tls_pool', _('TLS & Pooling'));
+		s.tab('logging', _('Logging'));
+		s.tab('additional', _('Additional'));
 		s.tab('init', _('Startup settings'));
-
-		defTabOpts(s, 'common', commonConf, {optional: true});
+		defTabOpts(s, 'basic', grpBasic, {optional: true});
+		defTabOpts(s, 'ports_vhost', grpPortsVhost, {optional: true});
+		defTabOpts(s, 'dashboard', grpDashboard, {optional: true});
+		defTabOpts(s, 'auth', grpAuth, {optional: true});
+		defTabOpts(s, 'firewall', grpFirewallLimits, {optional: true});
+		defTabOpts(s, 'tls_pool', grpTlsPool, {optional: true});
+		defTabOpts(s, 'logging', grpLogging, {optional: true});
+		defTabOpts(s, 'additional', grpAdditional, {optional: true});
 
 		o = s.taboption('init', form.SectionValue, 'init', form.TypedSection, 'init', _('Startup settings'));
 		s = o.subsection;
