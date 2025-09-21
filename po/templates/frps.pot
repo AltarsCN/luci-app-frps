@@ -337,3 +337,34 @@ msgstr ""
 #: applications/luci-app-frps/root/usr/share/luci/menu.d/luci-app-frps.json:3
 msgid "frp Server"
 msgstr ""
+
+# New strings for QUIC, OIDC, allow ports ranges
+msgid "QUIC bind port"
+msgstr ""
+
+msgid "BindQuicPort specifies the QUIC (UDP) port that the server listens on. If this value is 0, the server will not listen for QUIC connections. It may reuse the same numeric value as bind_port because bind_port is TCP.<br />By default, this value is 0."
+msgstr ""
+
+msgid "Auth method"
+msgstr ""
+
+msgid "Authentication method for validating frpc. Valid values: \"token\" (default) or \"oidc\"."
+msgstr ""
+
+msgid "OIDC Issuer"
+msgstr ""
+
+msgid "OIDC issuer URL (auth.method=oidc)."
+msgstr ""
+
+msgid "OIDC Audience"
+msgstr ""
+
+msgid "OIDC audience (auth.method=oidc)."
+msgstr ""
+
+msgid "Allow ports / ranges"
+msgstr ""
+
+msgid "List of allowed ports or ranges (e.g. \"2000-2005\", \"8080\"). Empty list means no restriction."
+msgstr ""

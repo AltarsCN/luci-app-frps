@@ -388,3 +388,34 @@ msgstr ""
 #: applications/luci-app-frps/root/usr/share/luci/menu.d/luci-app-frps.json:3
 msgid "frp Server"
 msgstr "frp伺服器"
+
+# 新增 QUIC、OIDC、埠號範圍等
+msgid "QUIC bind port"
+msgstr "QUIC 綁定埠號"
+
+msgid "BindQuicPort specifies the QUIC (UDP) port that the server listens on. If this value is 0, the server will not listen for QUIC connections. It may reuse the same numeric value as bind_port because bind_port is TCP.<br />By default, this value is 0."
+msgstr "BindQuicPort 指定伺服器監聽的 QUIC (UDP) 埠號。若為 0，則不監聽 QUIC 連線。可與 bind_port 共用數字，因為 bind_port 是 TCP。<br />預設為 0。"
+
+msgid "Auth method"
+msgstr "認證方式"
+
+msgid "Authentication method for validating frpc. Valid values: \"token\" (default) or \"oidc\"."
+msgstr "用於驗證 frpc 的認證方式。有效值：\"token\"(預設) 或 \"oidc\"。"
+
+msgid "OIDC Issuer"
+msgstr "OIDC 發行者"
+
+msgid "OIDC issuer URL (auth.method=oidc)."
+msgstr "OIDC Issuer URL（auth.method=oidc）。"
+
+msgid "OIDC Audience"
+msgstr "OIDC 受眾"
+
+msgid "OIDC audience (auth.method=oidc)."
+msgstr "OIDC audience（auth.method=oidc）。"
+
+msgid "Allow ports / ranges"
+msgstr "允許埠號/範圍"
+
+msgid "List of allowed ports or ranges (e.g. \"2000-2005\", \"8080\"). Empty list means no restriction."
+msgstr "允許的埠號或範圍列表（例如：\"2000-2005\"，\"8080\"）。空白表示不限。"

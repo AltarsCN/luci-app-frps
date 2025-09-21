@@ -1,13 +1,199 @@
 #!/bin/sh /etc/rc.common
+# procd init script for frps (Fast Reverse Proxy Server)
 
-START=99
-
+START=94
+STOP=10
 USE_PROCD=1
 
+NAME=frps
+PROG=/usr/bin/frps
+UCI=frps
+RUNTIME_DIR=/var/run/$NAME
+CONF_TOML=$RUNTIME_DIR/$NAME.toml
+
+uci_get_option() {
+	# uci_get_option <section> <option> <default>
+	local __v
+	__v=$(uci -q get $UCI.$1.$2)
+	[ -n "$__v" ] && echo "$__v" || echo "$3"
+}
+
+build_config() {
+	# Global (common)
+	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
+		vhost_http_port vhost_https_port vhost_http_timeout subdomain_host \
+		dashboard_port dashboard_user dashboard_pwd assets_dir \
+		dashboard_cert_file dashboard_key_file dashboard_ca_file \
+		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
+		log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
+		max_pool_count tls_force
+	mkdir -p "$RUNTIME_DIR" || return 1
+
+	# Global (common)
+	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
+		vhost_http_port vhost_https_port vhost_http_timeout subdomain_host \
+		dashboard_port dashboard_user dashboard_pwd assets_dir \
+		dashboard_cert_file dashboard_key_file dashboard_ca_file \
+		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
+		log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page
+
+	bind_port=$(uci_get_option common bind_port 7000)
+	quic_bind_port=$(uci_get_option common quic_bind_port 0)
+	kcp_bind_port=$(uci_get_option common kcp_bind_port 0)
+	bind_addr=$(uci_get_option common bind_addr 0.0.0.0)
+	proxy_bind_addr=$(uci_get_option common proxy_bind_addr 0.0.0.0)
+	vhost_http_port=$(uci_get_option common vhost_http_port 0)
+	vhost_https_port=$(uci_get_option common vhost_https_port 0)
+	vhost_http_timeout=$(uci_get_option common vhost_http_timeout 60)
+	dashboard_port=$(uci_get_option common dashboard_port 0)
+	dashboard_user=$(uci_get_option common dashboard_user "")
+	dashboard_pwd=$(uci_get_option common dashboard_pwd "")
+	assets_dir=$(uci_get_option common assets_dir "")
+	dashboard_cert_file=$(uci_get_option common dashboard_cert_file "")
+	dashboard_key_file=$(uci_get_option common dashboard_key_file "")
+	dashboard_ca_file=$(uci_get_option common dashboard_ca_file "")
+	subdomain_host=$(uci_get_option common subdomain_host "")
+	auth_method=$(uci_get_option common auth_method token)
+	token=$(uci_get_option common token "")
+	oidc_issuer=$(uci_get_option common oidc_issuer "")
+	oidc_audience=$(uci_get_option common oidc_audience "")
+	tcp_mux=$(uci_get_option common tcp_mux 1)
+	allow_ports=$(uci_get_option common allow_ports "")
+	max_ports_per_client=$(uci_get_option common max_ports_per_client 0)
+	log_file=$(uci_get_option common log_file /var/log/frps.log)
+	log_level=$(uci_get_option common log_level info)
+	log_max_days=$(uci_get_option common log_max_days 3)
+	heartbeat_timeout=$(uci_get_option common heartbeat_timeout 90)
+	disable_log_color=$(uci_get_option common disable_log_color 0)
+	custom_404_page=$(uci_get_option common custom_404_page "")
+
+	echo "# Generated at $(date +%Y-%m-%d_%H:%M:%S)" > "$CONF_TOML.tmp"
+	{
+		echo "bindPort = $bind_port"
+		[ "$quic_bind_port" != 0 ] && echo "quicBindPort = $quic_bind_port"
+		[ "$kcp_bind_port" != 0 ] && echo "kcpBindPort = $kcp_bind_port"
+		[ "$bind_addr" != "0.0.0.0" ] && echo "bindAddr = \"$bind_addr\""
+		[ "$proxy_bind_addr" != "0.0.0.0" ] && echo "proxyBindAddr = \"$proxy_bind_addr\""
+
+		[ "$vhost_http_port" != 0 ] && echo "vhostHTTPPort = $vhost_http_port"
+		[ "$vhost_https_port" != 0 ] && echo "vhostHTTPSPort = $vhost_https_port"
+		[ "$vhost_http_timeout" != 60 ] && echo "vhostHTTPTimeout = $vhost_http_timeout"
+		[ -n "$subdomain_host" ] && echo "subDomainHost = \"$subdomain_host\""
+
+		# Dashboard (webServer in new frp config)
+		if [ "$dashboard_port" != 0 ]; then
+			echo "webServer.port = $dashboard_port"
+			[ -n "$dashboard_user" ] && echo "webServer.user = \"$dashboard_user\""
+			[ -n "$dashboard_pwd" ] && echo "webServer.password = \"$dashboard_pwd\""
+			[ -n "$assets_dir" ] && echo "webServer.assetsDir = \"$assets_dir\""
+			if [ -n "$dashboard_cert_file" ] && [ -n "$dashboard_key_file" ]; then
+				echo "webServer.tls.certFile = \"$dashboard_cert_file\""
+				echo "webServer.tls.keyFile = \"$dashboard_key_file\""
+				[ -n "$dashboard_ca_file" ] && echo "webServer.tls.trustedCaFile = \"$dashboard_ca_file\""
+			fi
+		fi
+
+		# Auth
+		if [ "$auth_method" = oidc ]; then
+			[ -n "$oidc_issuer" ] && echo "auth.method = \"oidc\""
+			[ -n "$oidc_issuer" ] && echo "auth.oidc.issuer = \"$oidc_issuer\""
+			[ -n "$oidc_audience" ] && echo "auth.oidc.audience = \"$oidc_audience\""
+		else
+			[ -n "$token" ] && echo "auth.method = \"token\"" && echo "auth.token = \"$token\""
+		fi
+
+		# Connection / limits
+		[ "$tcp_mux" = 1 ] || echo "transport.tcpMux = false"
+		# allowPorts list/range parsing
+		# Collect all list values for allow_ports
+		local _allow_entries _raw_allow
+		_allow_entries="$(uci -q show $UCI.common | sed -n "s/^$UCI\\.common\\.allow_ports='\(.*\)'/\1/p")"
+		if [ -n "$_allow_entries" ]; then
+			echo "allowPorts = ["
+			for _raw_allow in $_allow_entries; do
+				if echo "$_raw_allow" | grep -Eq '^[0-9]+-[0-9]+$'; then
+					_first=${_raw_allow%-*}
+					_second=${_raw_allow#*-}
+					[ "$_first" -le "$_second" ] && echo "  { start = $_first, end = $_second },"
+				elif echo "$_raw_allow" | grep -Eq '^[0-9]+$'; then
+					echo "  { single = $_raw_allow },"
+				fi
+			done
+			echo "]"
+		fi
+		[ "$max_ports_per_client" != 0 ] && echo "maxPortsPerClient = $max_ports_per_client"
+		[ "$tls_force" = 1 ] && echo "transport.tls.force = true"
+
+		# Logging
+		[ -n "$log_file" ] && echo "log.file = \"$log_file\""
+		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
+		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
+		[ "$disable_log_color" = 1 ] && echo "log.disableColor = true"
+
+		# Heartbeat timeout
+		[ "$heartbeat_timeout" != 90 ] && echo "transport.heartbeatTimeout = $heartbeat_timeout"
+
+		[ -n "$custom_404_page" ] && echo "custom404Page = \"$custom_404_page\""
+		# Additional dynamic settings list (common._)
+		local _added_keys
+		_added_keys=""
+		uci -q show frps.common | sed -n "s/^frps.common._='\(.*\)'/\1/p" | while read -r kv; do
+			[ -z "$kv" ] && continue
+			case "$kv" in *=*) key="${kv%%=*}" ; value="${kv#*=}" ;; *) continue ;; esac
+			if echo "$_added_keys" | grep -qw "$key" ; then
+				continue
+			fi
+			_added_keys="$_added_keys $key"
+			echo "$key = $value"
+		done
+	} >> "$CONF_TOML.tmp"
+
+	# Include conf_inc fragments (init section)
+	uci -q show frps.init | sed -n "s/^frps.init.conf_inc='\(.*\)'/\1/p" | while read -r incf; do
+		[ -f "$incf" ] || continue
+		echo "" >> "$CONF_TOML.tmp"
+		echo "# --- include: $incf ---" >> "$CONF_TOML.tmp"
+		cat "$incf" >> "$CONF_TOML.tmp"
+	done
+	mv "$CONF_TOML.tmp" "$CONF_TOML"
+}
+
 start_service() {
+	local enabled
+	enabled=$(uci_get_option init enabled 0)
+	[ "$enabled" = 1 ] || { echo "frps: disabled (init.enabled != 1)"; return 0; }
+
+	[ -x "$PROG" ] || { echo "frps: binary $PROG not found"; return 1; }
+	build_config || return 1
+
+	# init runtime flags
+	local run_user run_group stdout_flag stderr_flag respawn_flag
+	run_user=$(uci_get_option init user "")
+	run_group=$(uci_get_option init group "")
+	stdout_flag=$(uci_get_option init stdout 1)
+	stderr_flag=$(uci_get_option init stderr 1)
+	respawn_flag=$(uci_get_option init respawn 1)
+
 	procd_open_instance
-	procd_set_param command /usr/bin/frps
-	procd_set_param file /etc/config/frps
-	procd_set_param respawn
+	procd_set_param command "$PROG" -c "$CONF_TOML"
+	[ "$respawn_flag" = 1 ] && procd_set_param respawn 300 5 5
+	[ "$stdout_flag" = 1 ] && procd_set_param stdout 1
+	[ "$stderr_flag" = 1 ] && procd_set_param stderr 1
+	[ -n "$run_user" ] && procd_set_param user "$run_user"
+	[ -n "$run_group" ] && procd_set_param group "$run_group"
+	# Export env
+	uci -q show frps.init | sed -n "s/^frps.init.env='\(.*\)'/\1/p" | while read -r envline; do
+		[ -z "$envline" ] && continue
+		case "$envline" in *'='*) procd_set_param env "$envline" ;; esac
+	done
 	procd_close_instance
+}
+
+stop_service() {
+	[ -f "$CONF_TOML" ] && rm -f "$CONF_TOML"
+}
+
+reload_service() {
+	stop
+	start
 }
