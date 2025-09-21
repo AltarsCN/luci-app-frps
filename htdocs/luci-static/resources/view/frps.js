@@ -43,6 +43,10 @@ var commonConf = [
 	[form.Flag, 'tcp_mux', _('TCP mux'), _('TcpMux toggles TCP stream multiplexing. This allows multiple requests from a client to share a single TCP connection.<br />By default, this value is true.'), {datatype: 'bool', default: 'true'}],
 	[form.Value, 'custom_404_page', _('Custom 404 page'), _('Custom404Page specifies a path to a custom 404 page to display. If this value is "", a default page will be displayed.<br />By default, this value is "".')],
 	[form.DynamicList, 'allow_ports', _('Allow ports / ranges'), _('List of allowed ports or ranges (e.g. "2000-2005", "8080"). Empty list means no restriction.')],
+	// Firewall auto rule management
+	[form.ListValue, 'set_firewall', _('Firewall auto mode'), _('Automatically create/delete firewall rules for selected ports. Modes: no (do nothing), check (update when changed), force (always recreate on start & delete on stop).'), {values: ['no','check','force'], default: 'no'}],
+	[form.Value, 'tcp_ports', _('Firewall TCP ports'), _('Comma/space separated single ports or ranges, applied when firewall auto mode is not "no".')],
+	[form.Value, 'udp_ports', _('Firewall UDP ports'), _('Comma/space separated single ports or ranges, applied when firewall auto mode is not "no".')],
 	[form.Value, 'max_ports_per_client', _('Max ports per client'), _('MaxPortsPerClient specifies the maximum number of ports a single client may proxy to. If this value is 0, no limit will be applied.<br />By default, this value is 0.'), {datatype: 'uinteger'}],
 	[form.Value, 'max_pool_count', _('Max pool count'), _('transport.maxPoolCount limits number of pooled connections.'), {datatype: 'uinteger'}],
 	[form.Flag, 'tls_force', _('TLS force'), _('Force all connections to use TLS (transport.tls.force).'), {datatype: 'bool'}],

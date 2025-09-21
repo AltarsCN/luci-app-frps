@@ -418,3 +418,34 @@ msgstr "允许端口/范围"
 
 msgid "List of allowed ports or ranges (e.g. \"2000-2005\", \"8080\"). Empty list means no restriction."
 msgstr "允许的端口或范围列表（例如：\"2000-2005\"，\"8080\"）。为空表示不限制。"
+
+# Batch B firewall & transport additions
+msgid "Firewall auto mode"
+msgstr "防火墙自动模式"
+
+msgid "Automatically create/delete firewall rules for selected ports. Modes: no (do nothing), check (update when changed), force (always recreate on start & delete on stop)."
+msgstr "为所选端口自动创建/删除防火墙规则。模式：no(不操作)、check(有变更时更新)、force(启动时重建并在停止时删除)。"
+
+msgid "Firewall TCP ports"
+msgstr "防火墙 TCP 端口"
+
+msgid "Comma/space separated single ports or ranges, applied when firewall auto mode is not \"no\"."
+msgstr "以逗号或空格分隔的单个端口或范围；当自动模式不为 no 时生效。"
+
+msgid "Firewall UDP ports"
+msgstr "防火墙 UDP 端口"
+
+msgid "Comma/space separated single ports or ranges, applied when firewall auto mode is not \"no\"."
+msgstr "以逗号或空格分隔的单个端口或范围；当自动模式不为 no 时生效。"
+
+msgid "Max pool count"
+msgstr "最大连接池数"
+
+msgid "transport.maxPoolCount limits number of pooled connections."
+msgstr "transport.maxPoolCount 限制连接池中的连接数量。"
+
+msgid "TLS force"
+msgstr "强制 TLS"
+
+msgid "Force all connections to use TLS (transport.tls.force)."
+msgstr "强制所有连接使用 TLS (transport.tls.force)。"

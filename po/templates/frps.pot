@@ -368,3 +368,34 @@ msgstr ""
 
 msgid "List of allowed ports or ranges (e.g. \"2000-2005\", \"8080\"). Empty list means no restriction."
 msgstr ""
+
+# Batch B firewall & transport additions
+msgid "Firewall auto mode"
+msgstr ""
+
+msgid "Automatically create/delete firewall rules for selected ports. Modes: no (do nothing), check (update when changed), force (always recreate on start & delete on stop)."
+msgstr ""
+
+msgid "Firewall TCP ports"
+msgstr ""
+
+msgid "Comma/space separated single ports or ranges, applied when firewall auto mode is not \"no\"."
+msgstr ""
+
+msgid "Firewall UDP ports"
+msgstr ""
+
+msgid "Comma/space separated single ports or ranges, applied when firewall auto mode is not \"no\"."
+msgstr ""
+
+msgid "Max pool count"
+msgstr ""
+
+msgid "transport.maxPoolCount limits number of pooled connections."
+msgstr ""
+
+msgid "TLS force"
+msgstr ""
+
+msgid "Force all connections to use TLS (transport.tls.force)."
+msgstr ""

@@ -18,6 +18,11 @@ uci_get_option() {
 	[ -n "$__v" ] && echo "$__v" || echo "$3"
 }
 
+# helper to echo boolean true/false from numeric 0/1 (default false if not 1)
+bool_of() {
+    [ "$1" = 1 ] && echo true || echo false
+}
+
 build_config() {
 	# Global (common)
 	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
@@ -67,7 +72,14 @@ build_config() {
 	disable_log_color=$(uci_get_option common disable_log_color 0)
 	custom_404_page=$(uci_get_option common custom_404_page "")
 
+	# Collect OIDC warning if selected but missing mandatory fields (issuer & audience)
+	local _oidc_warn=""
+	if [ "$auth_method" = oidc ]; then
+		[ -z "$oidc_issuer" ] && _oidc_warn="${_oidc_warn} issuer"
+		[ -z "$oidc_audience" ] && _oidc_warn="${_oidc_warn} audience"
+	fi
 	echo "# Generated at $(date +%Y-%m-%d_%H:%M:%S)" > "$CONF_TOML.tmp"
+	[ -n "$_oidc_warn" ] && echo "# WARNING: OIDC selected but missing:$_oidc_warn (auth may fail)" >> "$CONF_TOML.tmp"
 	{
 		echo "bindPort = $bind_port"
 		[ "$quic_bind_port" != 0 ] && echo "quicBindPort = $quic_bind_port"
@@ -104,20 +116,24 @@ build_config() {
 
 		# Connection / limits
 		[ "$tcp_mux" = 1 ] || echo "transport.tcpMux = false"
-		# allowPorts list/range parsing
-		# Collect all list values for allow_ports
-		local _allow_entries _raw_allow
+		# allowPorts enhanced parsing: each UCI list item may contain comma/space separated tokens
+		local _allow_entries _raw_entry _tok
 		_allow_entries="$(uci -q show $UCI.common | sed -n "s/^$UCI\\.common\\.allow_ports='\(.*\)'/\1/p")"
 		if [ -n "$_allow_entries" ]; then
 			echo "allowPorts = ["
-			for _raw_allow in $_allow_entries; do
-				if echo "$_raw_allow" | grep -Eq '^[0-9]+-[0-9]+$'; then
-					_first=${_raw_allow%-*}
-					_second=${_raw_allow#*-}
-					[ "$_first" -le "$_second" ] && echo "  { start = $_first, end = $_second },"
-				elif echo "$_raw_allow" | grep -Eq '^[0-9]+$'; then
-					echo "  { single = $_raw_allow },"
-				fi
+			for _raw_entry in $_allow_entries; do
+				# split on comma into tokens; also convert remaining commas to space then iterate
+				_raw_entry=${_raw_entry//,/ }
+				for _tok in $_raw_entry; do
+					[ -z "$_tok" ] && continue
+					if echo "$_tok" | grep -Eq '^[0-9]+-[0-9]+$'; then
+						_first=${_tok%-*}
+						_second=${_tok#*-}
+						[ "$_first" -le "$_second" ] && echo "  { start = $_first, end = $_second },"
+					elif echo "$_tok" | grep -Eq '^[0-9]+$'; then
+						echo "  { single = $_tok },"
+					fi
+				done
 			done
 			echo "]"
 		fi
@@ -187,13 +203,94 @@ start_service() {
 		case "$envline" in *'='*) procd_set_param env "$envline" ;; esac
 	done
 	procd_close_instance
+
+	add_firewall
 }
 
 stop_service() {
 	[ -f "$CONF_TOML" ] && rm -f "$CONF_TOML"
+	del_firewall
 }
 
 reload_service() {
 	stop
 	start
+}
+
+# ---------------- Firewall helper (optional) ----------------
+# Behavior controlled by UCI keys in 'common' section:
+#   set_firewall: no|check|force (default: no)
+#   tcp_ports: "7000,8000-8005" (comma separated single or ranges)
+#   udp_ports: similar format
+# Modes:
+#   no     -> do nothing
+#   check  -> create/update rules only if changed
+#   force  -> always create on start, delete on stop
+
+add_firewall() {
+	local set_firewall tcp_ports udp_ports
+	set_firewall=$(uci -q get frps.common.set_firewall 2>/dev/null)
+	tcp_ports=$(uci -q get frps.common.tcp_ports 2>/dev/null)
+	udp_ports=$(uci -q get frps.common.udp_ports 2>/dev/null)
+	[ -z "$set_firewall" ] && return 0
+	[ "$set_firewall" = "no" ] && return 0
+
+	local update_tcp=0 update_udp=0 existing
+	if [ -n "$tcp_ports" ]; then
+		existing=$(uci -q get firewall.frps_t_auto.dest_port 2>/dev/null)
+		if [ "$set_firewall" = "force" ] || [ "$existing" != "$tcp_ports" ]; then
+			update_tcp=1
+		fi
+		if [ $update_tcp -eq 1 ]; then
+			uci -q delete firewall.frps_t_auto
+			uci set firewall.frps_t_auto=rule
+			uci set firewall.frps_t_auto.name='frps_t_auto'
+			uci set firewall.frps_t_auto.src='wan'
+			uci set firewall.frps_t_auto.target='ACCEPT'
+			uci set firewall.frps_t_auto.proto='tcp'
+			uci set firewall.frps_t_auto.dest_port="$tcp_ports"
+			uci set firewall.frps_t_auto.enabled='1'
+		fi
+	fi
+
+	if [ -n "$udp_ports" ]; then
+		existing=$(uci -q get firewall.frps_u_auto.dest_port 2>/dev/null)
+		if [ "$set_firewall" = "force" ] || [ "$existing" != "$udp_ports" ]; then
+			update_udp=1
+		fi
+		if [ $update_udp -eq 1 ]; then
+			uci -q delete firewall.frps_u_auto
+			uci set firewall.frps_u_auto=rule
+			uci set firewall.frps_u_auto.name='frps_u_auto'
+			uci set firewall.frps_u_auto.src='wan'
+			uci set firewall.frps_u_auto.target='ACCEPT'
+			uci set firewall.frps_u_auto.proto='udp'
+			uci set firewall.frps_u_auto.dest_port="$udp_ports"
+			uci set firewall.frps_u_auto.enabled='1'
+		fi
+	fi
+
+	if [ $update_tcp -eq 1 ] || [ $update_udp -eq 1 ]; then
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+
+del_firewall() {
+	local set_firewall
+	set_firewall=$(uci -q get frps.common.set_firewall 2>/dev/null)
+	[ "$set_firewall" = "force" ] || return 0
+	local changed=0
+	if uci -q get firewall.frps_t_auto >/dev/null 2>&1; then
+		uci -q delete firewall.frps_t_auto
+		changed=1
+	fi
+	if uci -q get firewall.frps_u_auto >/dev/null 2>&1; then
+		uci -q delete firewall.frps_u_auto
+		changed=1
+	fi
+	if [ $changed -eq 1 ]; then
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
 }
