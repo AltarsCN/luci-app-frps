@@ -7,8 +7,7 @@ USE_PROCD=1
 
 NAME=frps
 PROG=/usr/bin/frps
-UCI=frps
-RUNTIME_DIR=/var/run/$NAME
+UCI=frps		[ -n "$log_file" ] && [ "$log_file" != "/dev/null" ] && echo "log.to = \"$log_file\""RUNTIME_DIR=/var/run/$NAME
 CONF_TOML=$RUNTIME_DIR/$NAME.toml
 
 uci_get_option() {
@@ -148,7 +147,7 @@ build_config() {
 		[ "$max_pool_count" != 0 ] && echo "transport.maxPoolCount = $max_pool_count"
 
 		# Logging
-		[ -n "$log_file" ] && echo "log.file = \"$log_file\""
+		# [ -n "$log_file" ] && echo "log.file = \"$log_file\""
 		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
 		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
 		is_enabled "$disable_log_color" && echo "log.disableColor = true"
