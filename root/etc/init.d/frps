@@ -7,7 +7,8 @@ USE_PROCD=1
 
 NAME=frps
 PROG=/usr/bin/frps
-UCI=frps		[ -n "$log_file" ] && [ "$log_file" != "/dev/null" ] && echo "log.to = \"$log_file\""RUNTIME_DIR=/var/run/$NAME
+UCI=frps
+RUNTIME_DIR=/var/run/$NAME
 CONF_TOML=$RUNTIME_DIR/$NAME.toml
 
 uci_get_option() {
@@ -120,7 +121,7 @@ build_config() {
 		fi
 
 		# Connection / limits
-		is_enabled "$tcp_mux" || echo "transport.tcpMux = false"
+		echo "transport.tcpMux = $(bool_of "$tcp_mux")"
 		# allowPorts enhanced parsing: each UCI list item may contain comma/space separated tokens
 		local _allow_entries _raw_entry _tok
 		_allow_entries="$(uci -q show $UCI.common | sed -n "s/^$UCI\\.common\\.allow_ports='\(.*\)'/\1/p")"
@@ -147,7 +148,9 @@ build_config() {
 		[ "$max_pool_count" != 0 ] && echo "transport.maxPoolCount = $max_pool_count"
 
 		# Logging
-		# [ -n "$log_file" ] && echo "log.file = \"$log_file\""
+		# Only output log.to if user explicitly configured a non-default log file
+		# Let frp use console output by default for better integration with OpenWrt logging
+		[ -n "$log_file" ] && [ "$log_file" != "/var/log/frps.log" ] && [ "$log_file" != "console" ] && [ "$log_file" != "/dev/null" ] && echo "log.to = \"$log_file\""
 		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
 		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
 		is_enabled "$disable_log_color" && echo "log.disableColor = true"
