@@ -6,6 +6,7 @@
 
 //	[Widget, Option, Title, Description, {Param: 'Value'}],
 var startupConf = [
+	[form.Flag, 'enabled', _('Enabled'), _('Enable or disable the frps service (init.enabled).')],
 	[form.Flag, 'stdout', _('Log stdout')],
 	[form.Flag, 'stderr', _('Log stderr')],
 	[widgets.UserSelect, 'user', _('Run daemon as user')],
@@ -73,8 +74,9 @@ var grpLogging = [
 	[form.Flag, 'disable_log_color', _('Disable log color'), _('DisableLogColor disables log colors when LogWay == "console" when set to true.<br />By default, this value is false.'), {datatype: 'bool', default: 'true'}]
 ];
 
+// Additional settings: rename '_' to 'extra_settings' (still read old '_' if exists)
 var grpAdditional = [
-	[form.DynamicList, '_', _('Additional settings'), _('This list can be used to specify some additional parameters which have not been included in this LuCI.'), {placeholder: 'Key-A=Value-A'}]
+	[form.DynamicList, 'extra_settings', _('Additional settings'), _('This list can be used to specify some additional parameters which have not been included in this LuCI.'), {placeholder: 'Key-A=Value-A'}]
 ];
 
 function setParams(o, params) {
@@ -113,6 +115,17 @@ function defTabOpts(s, t, opts, params) {
 		var o = s.taboption(t, opt[0], opt[1], opt[2], opt[3]);
 		setParams(o, opt[4]);
 		setParams(o, params);
+		// DynamicList delete guard: ignore delete if option not present in UCI (avoid ubus code 4)
+		if (o instanceof form.DynamicList) {
+			(function(orig) {
+				o.remove = function(section_id) {
+					var cur = this.map.data.get(this.map.config, section_id, this.option);
+					if (cur == null)
+						return Promise.resolve();
+					return orig.apply(this, arguments);
+				};
+			})(o.remove);
+		}
 	}
 }
 
@@ -199,6 +212,13 @@ return view.extend({
 		defTabOpts(s, 'tls_pool', grpTlsPool);
 		defTabOpts(s, 'logging', grpLogging);
 		defTabOpts(s, 'additional', grpAdditional);
+
+		// Backward compatibility: if old '_' list exists and new 'extra_settings' empty, show old values
+		var oldList = m.data.get('frps', 'common', '_');
+		var newList = m.data.get('frps', 'common', 'extra_settings');
+		if (oldList && (!newList || newList.length === 0)) {
+			m.data.set('frps', 'common', 'extra_settings', oldList);
+		}
 
 		o = s.taboption('init', form.SectionValue, 'init', form.TypedSection, 'init', _('Startup settings'));
 		s = o.subsection;

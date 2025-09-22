@@ -18,9 +18,21 @@ uci_get_option() {
 	[ -n "$__v" ] && echo "$__v" || echo "$3"
 }
 
-# helper to echo boolean true/false from numeric 0/1 (default false if not 1)
+# helper functions
+# bool_of: return literal true/false for TOML based on common truthy forms
 bool_of() {
-    [ "$1" = 1 ] && echo true || echo false
+	case "$1" in
+		1|true|TRUE|yes|on) echo true ;;
+		*) echo false ;;
+	esac
+}
+
+# is_enabled: shell predicate usage: if is_enabled "$val"; then ...; fi
+is_enabled() {
+	case "$1" in
+		1|true|TRUE|yes|on) return 0 ;;
+		*) return 1 ;;
+	esac
 }
 
 build_config() {
@@ -33,14 +45,6 @@ build_config() {
 		log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
 		max_pool_count tls_force
 	mkdir -p "$RUNTIME_DIR" || return 1
-
-	# Global (common)
-	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
-		vhost_http_port vhost_https_port vhost_http_timeout subdomain_host \
-		dashboard_port dashboard_user dashboard_pwd assets_dir \
-		dashboard_cert_file dashboard_key_file dashboard_ca_file \
-		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
-		log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page
 
 	bind_port=$(uci_get_option common bind_port 7000)
 	quic_bind_port=$(uci_get_option common quic_bind_port 0)
@@ -71,6 +75,8 @@ build_config() {
 	heartbeat_timeout=$(uci_get_option common heartbeat_timeout 90)
 	disable_log_color=$(uci_get_option common disable_log_color 0)
 	custom_404_page=$(uci_get_option common custom_404_page "")
+	tls_force=$(uci_get_option common tls_force 0)
+	max_pool_count=$(uci_get_option common max_pool_count 0)
 
 	# Collect OIDC warning if selected but missing mandatory fields (issuer & audience)
 	local _oidc_warn=""
@@ -115,7 +121,7 @@ build_config() {
 		fi
 
 		# Connection / limits
-		[ "$tcp_mux" = 1 ] || echo "transport.tcpMux = false"
+		is_enabled "$tcp_mux" || echo "transport.tcpMux = false"
 		# allowPorts enhanced parsing: each UCI list item may contain comma/space separated tokens
 		local _allow_entries _raw_entry _tok
 		_allow_entries="$(uci -q show $UCI.common | sed -n "s/^$UCI\\.common\\.allow_ports='\(.*\)'/\1/p")"
@@ -138,22 +144,25 @@ build_config() {
 			echo "]"
 		fi
 		[ "$max_ports_per_client" != 0 ] && echo "maxPortsPerClient = $max_ports_per_client"
-		[ "$tls_force" = 1 ] && echo "transport.tls.force = true"
+		if is_enabled "$tls_force"; then echo "transport.tls.force = true"; fi
+		[ "$max_pool_count" != 0 ] && echo "transport.maxPoolCount = $max_pool_count"
 
 		# Logging
 		[ -n "$log_file" ] && echo "log.file = \"$log_file\""
 		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
 		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
-		[ "$disable_log_color" = 1 ] && echo "log.disableColor = true"
+		is_enabled "$disable_log_color" && echo "log.disableColor = true"
 
 		# Heartbeat timeout
 		[ "$heartbeat_timeout" != 90 ] && echo "transport.heartbeatTimeout = $heartbeat_timeout"
 
 		[ -n "$custom_404_page" ] && echo "custom404Page = \"$custom_404_page\""
-		# Additional dynamic settings list (common._)
-		local _added_keys
+		# Additional dynamic settings lists: legacy '_' and new 'extra_settings'
+		local _added_keys _legacy_list _new_list
 		_added_keys=""
-		uci -q show frps.common | sed -n "s/^frps.common._='\(.*\)'/\1/p" | while read -r kv; do
+		_legacy_list=$(uci -q show frps.common | sed -n "s/^frps.common._='\(.*\)'/\1/p")
+		_new_list=$(uci -q show frps.common | sed -n "s/^frps.common.extra_settings='\(.*\)'/\1/p")
+		for kv in $_legacy_list $_new_list; do
 			[ -z "$kv" ] && continue
 			case "$kv" in *=*) key="${kv%%=*}" ; value="${kv#*=}" ;; *) continue ;; esac
 			if echo "$_added_keys" | grep -qw "$key" ; then
@@ -172,6 +181,7 @@ build_config() {
 		cat "$incf" >> "$CONF_TOML.tmp"
 	done
 	mv "$CONF_TOML.tmp" "$CONF_TOML"
+	chmod 600 "$CONF_TOML" 2>/dev/null || true
 }
 
 start_service() {
