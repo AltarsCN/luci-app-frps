@@ -37,13 +37,15 @@ is_enabled() {
 
 build_config() {
 	# Global (common)
+	# NOTE: legacy "log_file" (INI era) is deprecated; prefer new UCI key "log_to" mapping to frp v1 log.to
+	# NOTE: UI historical field "bind_udp_port" is deprecated (no direct v1 field); not read here intentionally.
 	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
 		vhost_http_port vhost_https_port vhost_http_timeout subdomain_host \
 		dashboard_port dashboard_user dashboard_pwd assets_dir \
 		dashboard_cert_file dashboard_key_file dashboard_ca_file \
 		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
-		log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
-		max_pool_count tls_force
+		log_to log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
+		max_pool_count tls_force legacy_log_migrated enable_prometheus tcp_mux_keepalive_interval tcp_keepalive user_conn_timeout udp_packet_size
 	mkdir -p "$RUNTIME_DIR" || return 1
 
 	bind_port=$(uci_get_option common bind_port 7000)
@@ -54,22 +56,37 @@ build_config() {
 	vhost_http_port=$(uci_get_option common vhost_http_port 0)
 	vhost_https_port=$(uci_get_option common vhost_https_port 0)
 	vhost_http_timeout=$(uci_get_option common vhost_http_timeout 60)
-	dashboard_port=$(uci_get_option common dashboard_port 0)
-	dashboard_user=$(uci_get_option common dashboard_user "")
-	dashboard_pwd=$(uci_get_option common dashboard_pwd "")
+	webserver_addr=$(uci_get_option common webserver_addr "127.0.0.1")
+	webserver_port=$(uci_get_option common webserver_port 0)
+	webserver_user=$(uci_get_option common webserver_user "")
+	webserver_pwd=$(uci_get_option common webserver_pwd "")
 	assets_dir=$(uci_get_option common assets_dir "")
-	dashboard_cert_file=$(uci_get_option common dashboard_cert_file "")
-	dashboard_key_file=$(uci_get_option common dashboard_key_file "")
-	dashboard_ca_file=$(uci_get_option common dashboard_ca_file "")
+	webserver_cert_file=$(uci_get_option common webserver_cert_file "")
+	webserver_key_file=$(uci_get_option common webserver_key_file "")
+	webserver_ca_file=$(uci_get_option common webserver_ca_file "")
 	subdomain_host=$(uci_get_option common subdomain_host "")
 	auth_method=$(uci_get_option common auth_method token)
 	token=$(uci_get_option common token "")
 	oidc_issuer=$(uci_get_option common oidc_issuer "")
 	oidc_audience=$(uci_get_option common oidc_audience "")
 	tcp_mux=$(uci_get_option common tcp_mux 1)
+	tcp_mux_keepalive_interval=$(uci_get_option common tcp_mux_keepalive_interval "")
+	tcp_keepalive=$(uci_get_option common tcp_keepalive "")
+	user_conn_timeout=$(uci_get_option common user_conn_timeout "")
+	udp_packet_size=$(uci_get_option common udp_packet_size "")
 	allow_ports=$(uci_get_option common allow_ports "")
 	max_ports_per_client=$(uci_get_option common max_ports_per_client 0)
-	log_file=$(uci_get_option common log_file /var/log/frps.log)
+	enable_prometheus=$(uci_get_option common enable_prometheus 0)
+	# New preferred key
+	log_to=$(uci_get_option common log_to "")
+	# Legacy key (do not assume default path, empty means unset)
+	log_file=$(uci_get_option common log_file "")
+	legacy_log_migrated=0
+	if [ -z "$log_to" ] && [ -n "$log_file" ]; then
+		# Migrate in-memory (do NOT write back here to avoid unintended UCI commit side-effects)
+		log_to="$log_file"
+		legacy_log_migrated=1
+	fi
 	log_level=$(uci_get_option common log_level info)
 	log_max_days=$(uci_get_option common log_max_days 3)
 	heartbeat_timeout=$(uci_get_option common heartbeat_timeout 90)
@@ -87,6 +104,8 @@ build_config() {
 	echo "# Generated at $(date +%Y-%m-%d_%H:%M:%S)" > "$CONF_TOML.tmp"
 	[ -n "$_oidc_warn" ] && echo "# WARNING: OIDC selected but missing:$_oidc_warn (auth may fail)" >> "$CONF_TOML.tmp"
 	{
+		# Core keys tracker (for conflict detection with extra_settings later)
+		local _core_keys="bindPort quicBindPort kcpBindPort bindAddr proxyBindAddr vhostHTTPPort vhostHTTPSPort vhostHTTPTimeout subDomainHost webServer.addr webServer.port webServer.user webServer.password webServer.assetsDir auth.method auth.token auth.oidc.issuer auth.oidc.audience transport.tcpMux allowPorts maxPortsPerClient transport.tls.force transport.maxPoolCount transport.tcpMuxKeepaliveInterval transport.tcpKeepalive enablePrometheus userConnTimeout udpPacketSize log.to log.level log.maxDays log.disableColor transport.heartbeatTimeout custom404Page"
 		echo "bindPort = $bind_port"
 		[ "$quic_bind_port" != 0 ] && echo "quicBindPort = $quic_bind_port"
 		[ "$kcp_bind_port" != 0 ] && echo "kcpBindPort = $kcp_bind_port"
@@ -99,15 +118,17 @@ build_config() {
 		[ -n "$subdomain_host" ] && echo "subDomainHost = \"$subdomain_host\""
 
 		# Dashboard (webServer in new frp config)
-		if [ "$dashboard_port" != 0 ]; then
-			echo "webServer.port = $dashboard_port"
-			[ -n "$dashboard_user" ] && echo "webServer.user = \"$dashboard_user\""
-			[ -n "$dashboard_pwd" ] && echo "webServer.password = \"$dashboard_pwd\""
+		# Only generate webServer config if user explicitly configured a port
+		if [ "$webserver_port" != "0" ] && [ -n "$webserver_port" ]; then
+			echo "webServer.addr = \"$webserver_addr\""
+			echo "webServer.port = $webserver_port"
+			[ -n "$webserver_user" ] && echo "webServer.user = \"$webserver_user\""
+			[ -n "$webserver_pwd" ] && echo "webServer.password = \"$webserver_pwd\""
 			[ -n "$assets_dir" ] && echo "webServer.assetsDir = \"$assets_dir\""
-			if [ -n "$dashboard_cert_file" ] && [ -n "$dashboard_key_file" ]; then
-				echo "webServer.tls.certFile = \"$dashboard_cert_file\""
-				echo "webServer.tls.keyFile = \"$dashboard_key_file\""
-				[ -n "$dashboard_ca_file" ] && echo "webServer.tls.trustedCaFile = \"$dashboard_ca_file\""
+			if [ -n "$webserver_cert_file" ] && [ -n "$webserver_key_file" ]; then
+				echo "webServer.tls.certFile = \"$webserver_cert_file\""
+				echo "webServer.tls.keyFile = \"$webserver_key_file\""
+				[ -n "$webserver_ca_file" ] && echo "webServer.tls.trustedCaFile = \"$webserver_ca_file\""
 			fi
 		fi
 
@@ -146,17 +167,35 @@ build_config() {
 		[ "$max_ports_per_client" != 0 ] && echo "maxPortsPerClient = $max_ports_per_client"
 		if is_enabled "$tls_force"; then echo "transport.tls.force = true"; fi
 		[ "$max_pool_count" != 0 ] && echo "transport.maxPoolCount = $max_pool_count"
+		[ -n "$tcp_mux_keepalive_interval" ] && echo "transport.tcpMuxKeepaliveInterval = $tcp_mux_keepalive_interval"
+		[ -n "$tcp_keepalive" ] && echo "transport.tcpKeepalive = $tcp_keepalive"
+		if is_enabled "$enable_prometheus"; then echo "enablePrometheus = true"; fi
+		[ -n "$user_conn_timeout" ] && echo "userConnTimeout = $user_conn_timeout"
+		[ -n "$udp_packet_size" ] && echo "udpPacketSize = $udp_packet_size"
 
 		# Logging
-		# Only output log.to if user explicitly configured a non-default log file
-		# Let frp use console output by default for better integration with OpenWrt logging
-		[ -n "$log_file" ] && [ "$log_file" != "/var/log/frps.log" ] && [ "$log_file" != "console" ] && [ "$log_file" != "/dev/null" ] && echo "log.to = \"$log_file\""
+		# Emit log.to if user provided any non-empty value that is not an explicit default console/dev/null.
+		# Previously we treated /var/log/frps.log as implicit default and suppressed it; now we always respect user choice.
+		if [ -n "$log_to" ] && [ "$log_to" != "console" ] && [ "$log_to" != "/dev/null" ]; then
+			[ $legacy_log_migrated -eq 1 ] && echo "# migrated from legacy log_file"
+			echo "log.to = \"$log_to\""
+		fi
 		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
 		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
 		is_enabled "$disable_log_color" && echo "log.disableColor = true"
 
-		# Heartbeat timeout
-		[ "$heartbeat_timeout" != 90 ] && echo "transport.heartbeatTimeout = $heartbeat_timeout"
+		# Heartbeat timeout logic: only emit if user diverges from automatic defaults.
+		# Upstream defaults: tcpMux=true -> -1 (disabled); tcpMux=false -> 90.
+		# Our UCI default currently 90. If tcpMux enabled and user kept 90, omit so upstream sets -1.
+		if [ "$tcp_mux" = 1 ]; then
+			# tcpMux true: write only if user explicitly set and it's neither 90 (meaning default) nor empty.
+			if [ -n "$heartbeat_timeout" ] && [ "$heartbeat_timeout" != 90 ]; then
+				echo "transport.heartbeatTimeout = $heartbeat_timeout"
+			fi
+		else
+			# tcpMux false: write only if user changed from 90.
+			[ "$heartbeat_timeout" != 90 ] && echo "transport.heartbeatTimeout = $heartbeat_timeout"
+		fi
 
 		[ -n "$custom_404_page" ] && echo "custom404Page = \"$custom_404_page\""
 		# Additional dynamic settings lists: legacy '_' and new 'extra_settings'
@@ -167,6 +206,11 @@ build_config() {
 		for kv in $_legacy_list $_new_list; do
 			[ -z "$kv" ] && continue
 			case "$kv" in *=*) key="${kv%%=*}" ; value="${kv#*=}" ;; *) continue ;; esac
+			# conflict: if key already in core key list, skip and annotate
+			if echo " $_core_keys " | grep -qw " $key " ; then
+				echo "# skipped duplicate extra setting '$key' (conflicts with core output)"
+				continue
+			fi
 			if echo "$_added_keys" | grep -qw "$key" ; then
 				continue
 			fi
@@ -190,6 +234,32 @@ start_service() {
 	local enabled
 	enabled=$(uci_get_option init enabled 0)
 	[ "$enabled" = 1 ] || { echo "frps: disabled (init.enabled != 1)"; return 0; }
+
+	# One-time migration block
+	local migrated_flag
+	migrated_flag=$(uci -q get frps.init.migration_done 2>/dev/null)
+	if [ "$migrated_flag" != 1 ]; then
+		# log_file -> log_to
+		local old_log new_log
+		old_log=$(uci -q get frps.common.log_file 2>/dev/null)
+		new_log=$(uci -q get frps.common.log_to 2>/dev/null)
+		if [ -n "$old_log" ] && [ -z "$new_log" ]; then
+			uci set frps.common.log_to="$old_log"
+		fi
+		# Dashboard/Admin legacy names (defensive: if出现仍迁移)
+		for f in dashboard_port dashboard_user dashboard_pwd assets_dir; do
+			val=$(uci -q get frps.common.$f 2>/dev/null) || true
+			[ -z "$val" ] && continue
+			case $f in
+				dashboard_port) uci set frps.common.webserver_port="$val" ;;
+				dashboard_user) uci set frps.common.webserver_user="$val" ;;
+				dashboard_pwd) uci set frps.common.webserver_pwd="$val" ;;
+				assets_dir) uci set frps.common.assets_dir="$val" ;;
+			esac
+		done
+		uci set frps.init.migration_done=1
+		uci commit frps
+	fi
 
 	[ -x "$PROG" ] || { echo "frps: binary $PROG not found"; return 1; }
 	build_config || return 1
