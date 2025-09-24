@@ -2,8 +2,8 @@
 
 include $(TOPDIR)/rules.mk
 
-LUCI_TITLE:=LuCI Support for frp server
-LUCI_DEPENDS:=+luci-base +frps
+LUCI_TITLE:=LuCI Support for frp client
+LUCI_DEPENDS:=+luci-base +frpc
 
 PKG_LICENSE:=Apache-2.0
 

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Ensure LuCI ucitrack restarts frpc on Save & Apply
+
+uci -q batch <<-EOF >/dev/null
+	delete ucitrack.@frpc[-1]
+	add ucitrack frpc
+	set ucitrack.@frpc[-1].init='frpc'
+	commit ucitrack
+EOF
+
+# Drop LuCI module caches to pick up menu/logic changes
+rm -f /tmp/luci-indexcache /tmp/luci-modulecache 2>/dev/null || true
+exit 0
