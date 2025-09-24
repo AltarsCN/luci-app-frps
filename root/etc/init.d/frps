@@ -5,11 +5,11 @@ START=94
 STOP=10
 USE_PROCD=1
 
-NAME=frps
+NAME=${NAME:-frps}
 PROG=/usr/bin/frps
 UCI=frps
-RUNTIME_DIR=/var/run/$NAME
-CONF_TOML=$RUNTIME_DIR/$NAME.toml
+RUNTIME_DIR=${RUNTIME_DIR:-/var/run/$NAME}
+CONF_TOML=${CONF_TOML:-$RUNTIME_DIR/$NAME.toml}
 
 uci_get_option() {
 	# uci_get_option <section> <option> <default>
@@ -36,6 +36,11 @@ is_enabled() {
 }
 
 build_config() {
+	# Ensure critical globals are sane before doing work
+	[ -z "$NAME" ] && NAME=frps
+	[ -z "$RUNTIME_DIR" ] && RUNTIME_DIR="/var/run/$NAME"
+	[ -z "$CONF_TOML" ] && CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+
 	# Global (common)
 	# NOTE: legacy "log_file" (INI era) is deprecated; prefer new UCI key "log_to" mapping to frp v1 log.to
 	# NOTE: UI historical field "bind_udp_port" is deprecated (no direct v1 field); not read here intentionally.
@@ -46,7 +51,8 @@ build_config() {
 		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
 		log_to log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
 		max_pool_count tls_force legacy_log_migrated enable_prometheus tcp_mux_keepalive_interval tcp_keepalive user_conn_timeout udp_packet_size
-	mkdir -p "$RUNTIME_DIR" || return 1
+	# Create runtime directory (ensure exists and writable)
+	mkdir -p "$(dirname "$CONF_TOML")" || return 1
 
 	bind_port=$(uci_get_option common bind_port 7000)
 	quic_bind_port=$(uci_get_option common quic_bind_port 0)
@@ -228,6 +234,8 @@ build_config() {
 	done
 	mv "$CONF_TOML.tmp" "$CONF_TOML"
 	chmod 600 "$CONF_TOML" 2>/dev/null || true
+	# Record the actual path for post-mortem if something previously wrote to root
+	echo "# writen_from_init: $CONF_TOML" >> "$CONF_TOML" 2>/dev/null || true
 }
 
 start_service() {
@@ -264,6 +272,18 @@ start_service() {
 	[ -x "$PROG" ] || { echo "frps: binary $PROG not found"; return 1; }
 	build_config || return 1
 
+	# Normalize CONF_TOML again (defensive) and ensure directory exists
+	[ -z "$NAME" ] && NAME=frps
+	[ -z "$RUNTIME_DIR" ] && RUNTIME_DIR="/var/run/$NAME"
+	[ -z "$CONF_TOML" ] && CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+	# If we somehow produced an invalid path like '/.toml' or filename is '.toml', fix to sane default
+	if [ "$(basename "$CONF_TOML")" = ".toml" ] || echo "$CONF_TOML" | grep -qE '/\.toml$' ; then
+		CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+	fi
+	mkdir -p "$(dirname "$CONF_TOML")" || true
+	# Log the chosen config path for debugging
+	echo "$(date +%Y-%m-%d_%H:%M:%S) [init] using CONF_TOML=$CONF_TOML" >> /tmp/log/frps-init.log 2>/dev/null || true
+
 	# init runtime flags
 	local run_user run_group stdout_flag stderr_flag respawn_flag
 	run_user=$(uci_get_option init user "")
@@ -290,7 +310,10 @@ start_service() {
 }
 
 stop_service() {
-	[ -f "$CONF_TOML" ] && rm -f "$CONF_TOML"
+	# Safety: avoid accidentally deleting root-level '.toml'
+	if [ -f "$CONF_TOML" ] && [ "$(basename "$CONF_TOML")" != ".toml" ]; then
+		rm -f "$CONF_TOML"
+	fi
 	del_firewall
 }
 
