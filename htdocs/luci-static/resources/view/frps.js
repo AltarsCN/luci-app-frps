@@ -2,6 +2,7 @@
 'require view';
 'require form';
 'require rpc';
+'require fs';
 'require tools.widgets as widgets';
 
 //	[Widget, Option, Title, Description, {Param: 'Value'}],
@@ -24,23 +25,25 @@ var grpBasic = [
 ];
 
 var grpPortsVhost = [
-	[form.Value, 'bind_udp_port', _('UDP bind port'), _('BindUdpPort specifies the UDP port that the server listens on. If this value is 0, the server will not listen for UDP connections.<br />By default, this value is 0'), {datatype: 'port'}],
-	[form.Value, 'kcp_bind_port', _('KCP bind port'), _('BindKcpPort specifies the KCP port that the server listens on. If this value is 0, the server will not listen for KCP connections.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'quic_bind_port', _('QUIC bind port'), _('BindQuicPort specifies the QUIC (UDP) port that the server listens on. If this value is 0, the server will not listen for QUIC connections. It may reuse the same numeric value as bind_port because bind_port is TCP.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'vhost_http_port', _('Vhost HTTP port'), _('VhostHttpPort specifies the port that the server listens for HTTP Vhost requests. If this value is 0, the server will not listen for HTTP requests.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'vhost_https_port', _('Vhost HTTPS port'), _('VhostHttpsPort specifies the port that the server listens for HTTPS Vhost requests. If this value is 0, the server will not listen for HTTPS requests.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'vhost_http_timeout', _('Vhost HTTP timeout'), _('VhostHttpTimeout specifies the response header timeout for the Vhost HTTP server, in seconds.<br />By default, this value is 60.'), {datatype: 'uinteger'}],
-	[form.Value, 'subdomain_host', _('Subdomain host'), _('SubDomainHost specifies the domain that will be attached to sub-domains requested by the client when using Vhost proxying. For example, if this value is set to "frps.com" and the client requested the subdomain "test", the resulting URL would be "test.frps.com".<br />By default, this value is "".')],
-	[form.Value, 'custom_404_page', _('Custom 404 page'), _('Custom404Page specifies a path to a custom 404 page to display. If this value is "", a default page will be displayed.<br />By default, this value is "".')]
+	// Deprecated bind_udp_port removed: upstream v1 no separate generic UDP listener; QUIC/KCP cover UDP usage.
+	[form.Value, 'kcp_bind_port', _('KCP bind port'), _('KCP bind port (0 disables).'), {datatype: 'port'}],
+	[form.Value, 'quic_bind_port', _('QUIC bind port'), _('QUIC bind port (0 disables).'), {datatype: 'port'}],
+	[form.Value, 'vhost_http_port', _('Vhost HTTP port'), _('Port for HTTP Vhost requests (0=disabled).'), {datatype: 'port'}],
+	[form.Value, 'vhost_https_port', _('Vhost HTTPS port'), _('Port for HTTPS Vhost requests (0=disabled).'), {datatype: 'port'}],
+	[form.Value, 'vhost_http_timeout', _('Vhost HTTP timeout'), _('Response header timeout seconds (default 60).'), {datatype: 'uinteger'}],
+	[form.Value, 'subdomain_host', _('Subdomain host'), _('Base domain for subdomain routing (e.g. frps.example.com).')],
+	[form.Value, 'custom_404_page', _('Custom 404 page'), _('Absolute path to custom 404 page; empty uses built-in.')]
 ];
 
 var grpDashboard = [
-	[form.Value, 'dashboard_addr', _('Dashboard address'), _('DashboardAddr specifies the address that the dashboard binds to.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}],
-	[form.Value, 'dashboard_port', _('Dashboard port'), _('DashboardPort specifies the port that the dashboard listens on. If this value is 0, the dashboard will not be started.<br />By default, this value is 0.'), {datatype: 'port'}],
-	[form.Value, 'dashboard_user', _('Dashboard user'), _('DashboardUser specifies the username that the dashboard will use for login.<br />By default, this value is "admin".')],
-	[form.Value, 'dashboard_pwd', _('Dashboard password'), _('DashboardPwd specifies the password that the dashboard will use for login.<br />By default, this value is "admin".'), {password: true}],
-	[form.Value, 'assets_dir', _('Assets dir'), _('AssetsDir specifies the local directory that the dashboard will load resources from. If this value is "", assets will be loaded from the bundled executable using statik.<br />By default, this value is "".')]
-];
+	[form.Value, 'webserver_addr', _('WebServer address'), _('WebServer address specifies the address that the web dashboard binds to.<br />By default, this value is "127.0.0.1".'), {datatype: 'ipaddr'}],
+	[form.Value, 'webserver_port', _('WebServer port'), _('WebServer port specifies the port that the web dashboard listens on. If this value is 0, the dashboard will not be started.<br />By default, this value is 0.'), {datatype: 'port'}],
+	[form.Value, 'webserver_user', _('WebServer user'), _('WebServer user specifies the username that the dashboard will use for login.<br />By default, this value is "admin".')],
+	[form.Value, 'webserver_pwd', _('WebServer password'), _('WebServer password specifies the password that the dashboard will use for login.<br />By default, this value is "admin".'), {password: true}],
+	[form.Value, 'assets_dir', _('Assets dir'), _('AssetsDir specifies the local directory that the dashboard will load resources from. If this value is "", assets will be loaded from the bundled executable using statik.<br />By default, this value is "".')],
+	[form.Value, 'webserver_cert_file', _('WebServer TLS cert file'), _('TLS certificate file path for HTTPS dashboard. Both cert and key files must be provided to enable TLS.')],
+	[form.Value, 'webserver_key_file', _('WebServer TLS key file'), _('TLS private key file path for HTTPS dashboard. Both cert and key files must be provided to enable TLS.')],
+	[form.Value, 'webserver_ca_file', _('WebServer TLS CA file'), _('TLS trusted CA file path for client certificate verification (optional).')]];
 
 var grpAuth = [
 	[form.ListValue, 'auth_method', _('Auth method'), _('Authentication method for validating frpc. Valid values: "token" (default) or "oidc".'), {values: ['token', 'oidc'], default: 'token'}],
@@ -50,7 +53,9 @@ var grpAuth = [
 ];
 
 var grpTcpMux = [
-	[form.Flag, 'tcp_mux', _('TCP mux'), _('TcpMux toggles TCP stream multiplexing. This allows multiple requests from a client to share a single TCP connection.<br />By default, this value is true.'), {datatype: 'bool', default: 'true'}]
+	[form.Flag, 'tcp_mux', _('TCP mux'), _('TcpMux toggles TCP stream multiplexing. This allows multiple requests from a client to share a single TCP connection.<br />By default, this value is true.'), {datatype: 'bool', default: 'true'}],
+	[form.Value, 'tcp_mux_keepalive_interval', _('TCP mux keepalive interval'), _('transport.tcpMuxKeepaliveInterval seconds (only relevant if TCP mux is enabled).'), {datatype: 'uinteger'}],
+	[form.Value, 'tcp_keepalive', _('TCP keepalive'), _('transport.tcpKeepalive seconds (interval between TCP-level keepalive probes).'), {datatype: 'uinteger'}]
 ];
 
 var grpFirewallLimits = [
@@ -64,14 +69,21 @@ var grpFirewallLimits = [
 var grpTlsPool = [
 	[form.Flag, 'tls_force', _('TLS force'), _('Force all connections to use TLS (transport.tls.force).'), {datatype: 'bool'}],
 	[form.Value, 'max_pool_count', _('Max pool count'), _('transport.maxPoolCount limits number of pooled connections.'), {datatype: 'uinteger'}],
-    [form.Value, 'heartbeat_timeout', _('Heartbeat timeout'), _('HeartBeatTimeout specifies the maximum time to wait for a heartbeat before terminating the connection. It is not recommended to change this value.<br />By default, this value is 90.'), {datatype: 'uinteger'}]
+    [form.Value, 'heartbeat_timeout', _('Heartbeat timeout'), _('HeartBeatTimeout specifies the maximum time to wait for a heartbeat before terminating the connection. It is not recommended to change this value.<br />By default, this value is 90.'), {datatype: 'uinteger'}],
+	[form.Flag, 'enable_prometheus', _('Enable Prometheus metrics'), _('Export Prometheus metrics at /metrics on webServer address (requires webServer.port > 0).')]
+];
+
+var grpAdvancedPerf = [
+	[form.Value, 'user_conn_timeout', _('User conn timeout'), _('userConnTimeout seconds (wait work connection).') , {datatype: 'uinteger'}],
+	[form.Value, 'udp_packet_size', _('UDP packet size'), _('udpPacketSize bytes (default 1500).'), {datatype: 'uinteger'}]
 ];
 
 var grpLogging = [
-	[form.Value, 'log_file', _('Log file'), _('LogFile specifies a file where logs will be written to. This value will only be used if LogWay is set appropriately.<br />By default, this value is "console".')],
-	[form.ListValue, 'log_level', _('Log level'), _('LogLevel specifies the minimum log level. Valid values are "trace", "debug", "info", "warn", and "error".<br />By default, this value is "info".'), {values: ['trace', 'debug', 'info', 'warn', 'error']}],
-	[form.Value, 'log_max_days', _('Log max days'), _('LogMaxDays specifies the maximum number of days to store log information before deletion. This is only used if LogWay == "file".<br />By default, this value is 0.'), {datatype: 'uinteger'}],
-	[form.Flag, 'disable_log_color', _('Disable log color'), _('DisableLogColor disables log colors when LogWay == "console" when set to true.<br />By default, this value is false.'), {datatype: 'bool', default: 'true'}]
+	[form.Value, 'log_to', _('Log output target'), _('Preferred new key. Accepts a file path or special values: "console", "/dev/null". Leave empty for upstream default (console).')],
+	[form.Value, 'log_file', _('(Deprecated) legacy log_file'), _('Deprecated legacy key retained for backward compatibility. Will be migrated to log_to in runtime; please move value to "Log output target" and clear this.'), {placeholder: '/var/log/frps.log'}],
+	[form.ListValue, 'log_level', _('Log level'), _('Minimum log level.'), {values: ['trace', 'debug', 'info', 'warn', 'error']}],
+	[form.Value, 'log_max_days', _('Log max days'), _('Maximum days to retain file logs (file mode only).'), {datatype: 'uinteger'}],
+	[form.Flag, 'disable_log_color', _('Disable log color'), _('Disable ANSI color in console logs.'), {datatype: 'bool', default: 'true'}]
 ];
 
 // Additional settings: rename '_' to 'extra_settings' (still read old '_' if exists)
@@ -168,6 +180,26 @@ function renderStatus(isRunning) {
 	return renderHTML;
 }
 
+// Exec frps init.d action
+function serviceAction(action) {
+	return fs.exec('/etc/init.d/frps', [ action ]).catch(function(e){ return { code: -1, stderr: (e && e.message) || '' }; });
+}
+
+function fmtNow() {
+	try { return new Date().toLocaleString(); } catch (e) { return new Date().toISOString(); }
+}
+
+function updateActionStatus(action, res) {
+	var el = document.getElementById('service_action_status');
+	if (!el) return;
+	var code = (res && typeof res.code !== 'undefined') ? res.code : 'n/a';
+	var msg = (res && res.stderr) ? ('' + res.stderr).trim() : '';
+	var ok = (code === 0);
+	el.innerText = String.format('%s: %s (code=%s) @ %s%s',
+		action.toUpperCase(), ok ? _('OK') : _('Failed'), code, fmtNow(), msg ? (' - ' + msg) : '');
+	el.style.color = ok ? 'green' : 'red';
+}
+
 return view.extend({
 	render: function() {
 		let m, s, o;
@@ -177,17 +209,26 @@ return view.extend({
 		s = m.section(form.NamedSection, '_status');
 		s.anonymous = true;
 		s.render = function (section_id) {
-			L.Poll.add(function () {
+			var refresh = function() {
 				return L.resolveDefault(getServiceStatus()).then(function(res) {
-					var view = document.getElementById("service_status");
-					view.innerHTML = renderStatus(res);
+					var view = document.getElementById('service_status');
+					if (view) view.innerHTML = renderStatus(res);
 				});
-			});
+			};
+
+			L.Poll.add(refresh);
 
 			return E('div', { class: 'cbi-map' },
 				E('fieldset', { class: 'cbi-section'}, [
-					E('p', { id: 'service_status' },
-						_('Collecting data ...'))
+					E('p', { id: 'service_status' }, _('Collecting data ...')),
+					E('div', { class: 'cbi-section-actions' }, [
+						E('button', { class: 'btn cbi-button-action', click: function(){ serviceAction('start').then(function(res){ updateActionStatus('start', res); }).then(refresh); } }, _('Start now')),
+						E('button', { class: 'btn cbi-button-reset', click: function(){ serviceAction('stop').then(function(res){ updateActionStatus('stop', res); }).then(refresh); } }, _('Stop')),
+						E('button', { class: 'btn cbi-button-reload', click: function(){ serviceAction('restart').then(function(res){ updateActionStatus('restart', res); }).then(refresh); } }, _('Restart'))
+					]),
+					E('div', { class: 'cbi-value-description' }, [
+						E('small', { id: 'service_action_status', style: 'opacity:0.85' }, _('No actions yet.'))
+					])
 				])
 			);
 		}
@@ -201,6 +242,7 @@ return view.extend({
 		s.tab('auth', _('Authentication'));
 		s.tab('firewall', _('Firewall & Limits'));
 		s.tab('tls_pool', _('TLS & Pooling'));
+		s.tab('advanced_perf', _('Advanced Perf'));
 		s.tab('logging', _('Logging'));
 		s.tab('additional', _('Additional'));
 		s.tab('init', _('Startup settings'));
@@ -210,6 +252,7 @@ return view.extend({
 		defTabOpts(s, 'auth', grpAuth);
 		defTabOpts(s, 'firewall', grpFirewallLimits);
 		defTabOpts(s, 'tls_pool', grpTlsPool);
+		defTabOpts(s, 'advanced_perf', grpAdvancedPerf);
 		defTabOpts(s, 'logging', grpLogging);
 		defTabOpts(s, 'additional', grpAdditional);
 
@@ -228,5 +271,13 @@ return view.extend({
 		defOpts(s, startupConf);
 
 		return m.render();
+	}
+,
+	// Restart frps after Save & Apply to apply new config immediately
+	handleSaveApply: function(ev) {
+		var self = this;
+		return this.super('handleSaveApply', ev).then(function(res) {
+			return fs.exec('/etc/init.d/frps', [ 'restart' ]).catch(function(e){ return null; }).then(function(){ return res; });
+		});
 	}
 });
