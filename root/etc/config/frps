@@ -1,0 +1,50 @@
+### Default UCI configuration for luci-app-frps
+### Split into a 'common' conf section and an 'init' section for startup control.
+
+config conf 'common'
+	# ========== Core listening ports ==========
+	option bind_port '7000'          # TCP listen port
+	option quic_bind_port '7000'     # QUIC UDP port (can reuse bind_port number)
+	option kcp_bind_port '0'         # Set >0 to enable KCP
+
+	# HTTP/HTTPS vhost (disabled by default)
+	option vhost_http_port '80'
+	option vhost_https_port '443'
+	# option vhost_http_timeout '60'
+
+	# Dashboard (disabled: 0)
+	option dashboard_port '0'
+	# option dashboard_user 'admin'
+	# option dashboard_pwd 'admin'
+
+	# Subdomain base (e.g. frps.example.com)
+	option subdomain_host ''
+
+	# Authentication token (empty means disabled)
+	option auth_method 'token'       # token|oidc
+	option token ''                  # token mode
+	# OIDC mode (uncomment and set when auth_method='oidc'):
+	# option oidc_issuer 'https://issuer.example.com/'
+	# option oidc_audience 'https://oidc-audience.com/.default'
+
+	# Connection / multiplexing
+	option tcp_mux '1'
+	# option allow_ports ''          # Example: list allow_ports '2000-3000'
+	# option max_ports_per_client '0'
+
+	# Logging
+	option log_file '/var/log/frps.log'
+	option log_level 'info'
+	option log_max_days '3'
+
+	# Heartbeat timeout (default 90)
+	option heartbeat_timeout '90'
+
+config init 'init'
+	# Runtime / process control
+	option enabled '0'       # Enable service (1=on, 0=off)
+	option stdout '0'        # Redirect stdout to log
+	option stderr '0'        # Redirect stderr to log
+	option respawn '1'       # Auto-respawn on crash
+	# option user 'frps'
+	# option group 'frps'

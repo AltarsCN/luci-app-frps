@@ -1,0 +1,418 @@
+#!/bin/sh /etc/rc.common
+# procd init script for frps (Fast Reverse Proxy Server)
+
+START=94
+STOP=10
+USE_PROCD=1
+
+NAME=${NAME:-frps}
+PROG=/usr/bin/frps
+UCI=frps
+RUNTIME_DIR=${RUNTIME_DIR:-/var/run/$NAME}
+CONF_TOML=${CONF_TOML:-$RUNTIME_DIR/$NAME.toml}
+
+uci_get_option() {
+	# uci_get_option <section> <option> <default>
+	local __v
+	__v=$(uci -q get $UCI.$1.$2)
+	[ -n "$__v" ] && echo "$__v" || echo "$3"
+}
+
+# helper functions
+# bool_of: return literal true/false for TOML based on common truthy forms
+bool_of() {
+	case "$1" in
+		1|true|TRUE|yes|on) echo true ;;
+		*) echo false ;;
+	esac
+}
+
+# is_enabled: shell predicate usage: if is_enabled "$val"; then ...; fi
+is_enabled() {
+	case "$1" in
+		1|true|TRUE|yes|on) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+build_config() {
+	# Ensure critical globals are sane before doing work
+	[ -z "$NAME" ] && NAME=frps
+	[ -z "$RUNTIME_DIR" ] && RUNTIME_DIR="/var/run/$NAME"
+	[ -z "$CONF_TOML" ] && CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+
+	# Global (common)
+	# NOTE: legacy "log_file" (INI era) is deprecated; prefer new UCI key "log_to" mapping to frp v1 log.to
+	# NOTE: UI historical field "bind_udp_port" is deprecated (no direct v1 field); not read here intentionally.
+	local bind_port quic_bind_port kcp_bind_port bind_addr proxy_bind_addr \
+		vhost_http_port vhost_https_port vhost_http_timeout subdomain_host \
+		dashboard_port dashboard_user dashboard_pwd assets_dir \
+		dashboard_cert_file dashboard_key_file dashboard_ca_file \
+		auth_method token oidc_issuer oidc_audience tcp_mux allow_ports max_ports_per_client \
+		log_to log_file log_level log_max_days heartbeat_timeout disable_log_color custom_404_page \
+		max_pool_count tls_force legacy_log_migrated enable_prometheus tcp_mux_keepalive_interval tcp_keepalive user_conn_timeout udp_packet_size
+	# Create runtime directory (ensure exists and writable)
+	mkdir -p "$(dirname "$CONF_TOML")" || return 1
+
+	bind_port=$(uci_get_option common bind_port 7000)
+	quic_bind_port=$(uci_get_option common quic_bind_port 0)
+	kcp_bind_port=$(uci_get_option common kcp_bind_port 0)
+	bind_addr=$(uci_get_option common bind_addr 0.0.0.0)
+	proxy_bind_addr=$(uci_get_option common proxy_bind_addr 0.0.0.0)
+	vhost_http_port=$(uci_get_option common vhost_http_port 0)
+	vhost_https_port=$(uci_get_option common vhost_https_port 0)
+	vhost_http_timeout=$(uci_get_option common vhost_http_timeout 60)
+	webserver_addr=$(uci_get_option common webserver_addr "127.0.0.1")
+	webserver_port=$(uci_get_option common webserver_port 0)
+	webserver_user=$(uci_get_option common webserver_user "")
+	webserver_pwd=$(uci_get_option common webserver_pwd "")
+	assets_dir=$(uci_get_option common assets_dir "")
+	webserver_cert_file=$(uci_get_option common webserver_cert_file "")
+	webserver_key_file=$(uci_get_option common webserver_key_file "")
+	webserver_ca_file=$(uci_get_option common webserver_ca_file "")
+	subdomain_host=$(uci_get_option common subdomain_host "")
+	auth_method=$(uci_get_option common auth_method token)
+	token=$(uci_get_option common token "")
+	oidc_issuer=$(uci_get_option common oidc_issuer "")
+	oidc_audience=$(uci_get_option common oidc_audience "")
+	tcp_mux=$(uci_get_option common tcp_mux 1)
+	tcp_mux_keepalive_interval=$(uci_get_option common tcp_mux_keepalive_interval "")
+	tcp_keepalive=$(uci_get_option common tcp_keepalive "")
+	user_conn_timeout=$(uci_get_option common user_conn_timeout "")
+	udp_packet_size=$(uci_get_option common udp_packet_size "")
+	allow_ports=$(uci_get_option common allow_ports "")
+	max_ports_per_client=$(uci_get_option common max_ports_per_client 0)
+	enable_prometheus=$(uci_get_option common enable_prometheus 0)
+	# New preferred key
+	log_to=$(uci_get_option common log_to "")
+	# Legacy key (do not assume default path, empty means unset)
+	log_file=$(uci_get_option common log_file "")
+	legacy_log_migrated=0
+	if [ -z "$log_to" ] && [ -n "$log_file" ]; then
+		# Migrate in-memory (do NOT write back here to avoid unintended UCI commit side-effects)
+		log_to="$log_file"
+		legacy_log_migrated=1
+	fi
+	log_level=$(uci_get_option common log_level info)
+	log_max_days=$(uci_get_option common log_max_days 3)
+	heartbeat_timeout=$(uci_get_option common heartbeat_timeout 90)
+	disable_log_color=$(uci_get_option common disable_log_color 0)
+	custom_404_page=$(uci_get_option common custom_404_page "")
+	tls_force=$(uci_get_option common tls_force 0)
+	max_pool_count=$(uci_get_option common max_pool_count 0)
+
+	# Collect OIDC warning if selected but missing mandatory fields (issuer & audience)
+	local _oidc_warn=""
+	if [ "$auth_method" = oidc ]; then
+		[ -z "$oidc_issuer" ] && _oidc_warn="${_oidc_warn} issuer"
+		[ -z "$oidc_audience" ] && _oidc_warn="${_oidc_warn} audience"
+	fi
+	echo "# Generated at $(date +%Y-%m-%d_%H:%M:%S)" > "$CONF_TOML.tmp"
+	[ -n "$_oidc_warn" ] && echo "# WARNING: OIDC selected but missing:$_oidc_warn (auth may fail)" >> "$CONF_TOML.tmp"
+	{
+		# Core keys tracker (for conflict detection with extra_settings later)
+		local _core_keys="bindPort quicBindPort kcpBindPort bindAddr proxyBindAddr vhostHTTPPort vhostHTTPSPort vhostHTTPTimeout subDomainHost webServer.addr webServer.port webServer.user webServer.password webServer.assetsDir auth.method auth.token auth.oidc.issuer auth.oidc.audience transport.tcpMux allowPorts maxPortsPerClient transport.tls.force transport.maxPoolCount transport.tcpMuxKeepaliveInterval transport.tcpKeepalive enablePrometheus userConnTimeout udpPacketSize log.to log.level log.maxDays log.disableColor transport.heartbeatTimeout custom404Page"
+		echo "bindPort = $bind_port"
+		[ "$quic_bind_port" != 0 ] && echo "quicBindPort = $quic_bind_port"
+		[ "$kcp_bind_port" != 0 ] && echo "kcpBindPort = $kcp_bind_port"
+		[ "$bind_addr" != "0.0.0.0" ] && echo "bindAddr = \"$bind_addr\""
+		[ "$proxy_bind_addr" != "0.0.0.0" ] && echo "proxyBindAddr = \"$proxy_bind_addr\""
+
+		[ "$vhost_http_port" != 0 ] && echo "vhostHTTPPort = $vhost_http_port"
+		[ "$vhost_https_port" != 0 ] && echo "vhostHTTPSPort = $vhost_https_port"
+		[ "$vhost_http_timeout" != 60 ] && echo "vhostHTTPTimeout = $vhost_http_timeout"
+		[ -n "$subdomain_host" ] && echo "subDomainHost = \"$subdomain_host\""
+
+		# Dashboard (webServer in new frp config)
+		# Only generate webServer config if user explicitly configured a port
+		if [ "$webserver_port" != "0" ] && [ -n "$webserver_port" ]; then
+			echo "webServer.addr = \"$webserver_addr\""
+			echo "webServer.port = $webserver_port"
+			[ -n "$webserver_user" ] && echo "webServer.user = \"$webserver_user\""
+			[ -n "$webserver_pwd" ] && echo "webServer.password = \"$webserver_pwd\""
+			[ -n "$assets_dir" ] && echo "webServer.assetsDir = \"$assets_dir\""
+			if [ -n "$webserver_cert_file" ] && [ -n "$webserver_key_file" ]; then
+				echo "webServer.tls.certFile = \"$webserver_cert_file\""
+				echo "webServer.tls.keyFile = \"$webserver_key_file\""
+				[ -n "$webserver_ca_file" ] && echo "webServer.tls.trustedCaFile = \"$webserver_ca_file\""
+			fi
+		fi
+
+		# Auth
+		if [ "$auth_method" = oidc ]; then
+			[ -n "$oidc_issuer" ] && echo "auth.method = \"oidc\""
+			[ -n "$oidc_issuer" ] && echo "auth.oidc.issuer = \"$oidc_issuer\""
+			[ -n "$oidc_audience" ] && echo "auth.oidc.audience = \"$oidc_audience\""
+		else
+			[ -n "$token" ] && echo "auth.method = \"token\"" && echo "auth.token = \"$token\""
+		fi
+
+		# Connection / limits
+		echo "transport.tcpMux = $(bool_of "$tcp_mux")"
+		# allowPorts enhanced parsing: each UCI list item may contain comma/space separated tokens
+		local _allow_entries _raw_entry _tok
+		_allow_entries="$(uci -q show $UCI.common | sed -n "s/^$UCI\\.common\\.allow_ports='\(.*\)'/\1/p")"
+		if [ -n "$_allow_entries" ]; then
+			echo "allowPorts = ["
+			for _raw_entry in $_allow_entries; do
+				# split on comma into tokens; also convert remaining commas to space then iterate
+				_raw_entry=${_raw_entry//,/ }
+				for _tok in $_raw_entry; do
+					[ -z "$_tok" ] && continue
+					if echo "$_tok" | grep -Eq '^[0-9]+-[0-9]+$'; then
+						_first=${_tok%-*}
+						_second=${_tok#*-}
+						[ "$_first" -le "$_second" ] && echo "  { start = $_first, end = $_second },"
+					elif echo "$_tok" | grep -Eq '^[0-9]+$'; then
+						echo "  { single = $_tok },"
+					fi
+				done
+			done
+			echo "]"
+		fi
+		[ "$max_ports_per_client" != 0 ] && echo "maxPortsPerClient = $max_ports_per_client"
+		if is_enabled "$tls_force"; then echo "transport.tls.force = true"; fi
+		[ "$max_pool_count" != 0 ] && echo "transport.maxPoolCount = $max_pool_count"
+		[ -n "$tcp_mux_keepalive_interval" ] && echo "transport.tcpMuxKeepaliveInterval = $tcp_mux_keepalive_interval"
+		[ -n "$tcp_keepalive" ] && echo "transport.tcpKeepalive = $tcp_keepalive"
+		if is_enabled "$enable_prometheus"; then echo "enablePrometheus = true"; fi
+		[ -n "$user_conn_timeout" ] && echo "userConnTimeout = $user_conn_timeout"
+		[ -n "$udp_packet_size" ] && echo "udpPacketSize = $udp_packet_size"
+
+		# Logging
+		# Emit log.to if user provided any non-empty value that is not an explicit default console/dev/null.
+		# Previously we treated /var/log/frps.log as implicit default and suppressed it; now we always respect user choice.
+		if [ -n "$log_to" ] && [ "$log_to" != "console" ] && [ "$log_to" != "/dev/null" ]; then
+			[ $legacy_log_migrated -eq 1 ] && echo "# migrated from legacy log_file"
+			echo "log.to = \"$log_to\""
+		fi
+		[ "$log_level" != info ] && echo "log.level = \"$log_level\""
+		[ "$log_max_days" != 3 ] && echo "log.maxDays = $log_max_days"
+		is_enabled "$disable_log_color" && echo "log.disableColor = true"
+
+		# Heartbeat timeout logic: only emit if user diverges from automatic defaults.
+		# Upstream defaults: tcpMux=true -> -1 (disabled); tcpMux=false -> 90.
+		# Our UCI default currently 90. If tcpMux enabled and user kept 90, omit so upstream sets -1.
+		if [ "$tcp_mux" = 1 ]; then
+			# tcpMux true: write only if user explicitly set and it's neither 90 (meaning default) nor empty.
+			if [ -n "$heartbeat_timeout" ] && [ "$heartbeat_timeout" != 90 ]; then
+				echo "transport.heartbeatTimeout = $heartbeat_timeout"
+			fi
+		else
+			# tcpMux false: write only if user changed from 90.
+			[ "$heartbeat_timeout" != 90 ] && echo "transport.heartbeatTimeout = $heartbeat_timeout"
+		fi
+
+		[ -n "$custom_404_page" ] && echo "custom404Page = \"$custom_404_page\""
+		# Additional dynamic settings lists: legacy '_' and new 'extra_settings'
+		local _added_keys _legacy_list _new_list
+		_added_keys=""
+		_legacy_list=$(uci -q show frps.common | sed -n "s/^frps.common._='\(.*\)'/\1/p")
+		_new_list=$(uci -q show frps.common | sed -n "s/^frps.common.extra_settings='\(.*\)'/\1/p")
+		for kv in $_legacy_list $_new_list; do
+			[ -z "$kv" ] && continue
+			case "$kv" in *=*) key="${kv%%=*}" ; value="${kv#*=}" ;; *) continue ;; esac
+			# conflict: if key already in core key list, skip and annotate
+			if echo " $_core_keys " | grep -qw " $key " ; then
+				echo "# skipped duplicate extra setting '$key' (conflicts with core output)"
+				continue
+			fi
+			if echo "$_added_keys" | grep -qw "$key" ; then
+				continue
+			fi
+			_added_keys="$_added_keys $key"
+			echo "$key = $value"
+		done
+	} >> "$CONF_TOML.tmp"
+
+	# Include conf_inc fragments (init section)
+	uci -q show frps.init | sed -n "s/^frps.init.conf_inc='\(.*\)'/\1/p" | while read -r incf; do
+		[ -f "$incf" ] || continue
+		echo "" >> "$CONF_TOML.tmp"
+		echo "# --- include: $incf ---" >> "$CONF_TOML.tmp"
+		cat "$incf" >> "$CONF_TOML.tmp"
+	done
+	mv "$CONF_TOML.tmp" "$CONF_TOML"
+	chmod 600 "$CONF_TOML" 2>/dev/null || true
+	# Record the actual path for post-mortem if something previously wrote to root
+	echo "# writen_from_init: $CONF_TOML" >> "$CONF_TOML" 2>/dev/null || true
+}
+
+start_service() {
+	local enabled
+	enabled=$(uci_get_option init enabled 0)
+	[ "$enabled" = 1 ] || { echo "frps: disabled (init.enabled != 1)"; return 0; }
+
+	# One-time migration block
+	local migrated_flag
+	migrated_flag=$(uci -q get frps.init.migration_done 2>/dev/null)
+	if [ "$migrated_flag" != 1 ]; then
+		# log_file -> log_to
+		local old_log new_log
+		old_log=$(uci -q get frps.common.log_file 2>/dev/null)
+		new_log=$(uci -q get frps.common.log_to 2>/dev/null)
+		if [ -n "$old_log" ] && [ -z "$new_log" ]; then
+			uci set frps.common.log_to="$old_log"
+		fi
+		# Dashboard/Admin legacy names (defensive: if出现仍迁移)
+		for f in dashboard_port dashboard_user dashboard_pwd assets_dir; do
+			val=$(uci -q get frps.common.$f 2>/dev/null) || true
+			[ -z "$val" ] && continue
+			case $f in
+				dashboard_port) uci set frps.common.webserver_port="$val" ;;
+				dashboard_user) uci set frps.common.webserver_user="$val" ;;
+				dashboard_pwd) uci set frps.common.webserver_pwd="$val" ;;
+				assets_dir) uci set frps.common.assets_dir="$val" ;;
+			esac
+		done
+		uci set frps.init.migration_done=1
+		uci commit frps
+	fi
+
+	[ -x "$PROG" ] || { echo "frps: binary $PROG not found"; return 1; }
+	build_config || return 1
+
+	# Normalize CONF_TOML again (defensive) and ensure directory exists
+	[ -z "$NAME" ] && NAME=frps
+	[ -z "$RUNTIME_DIR" ] && RUNTIME_DIR="/var/run/$NAME"
+	[ -z "$CONF_TOML" ] && CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+	# If we somehow produced an invalid path like '/.toml' or filename is '.toml', fix to sane default
+	if [ "$(basename "$CONF_TOML")" = ".toml" ] || echo "$CONF_TOML" | grep -qE '/\.toml$' ; then
+		CONF_TOML="$RUNTIME_DIR/$NAME.toml"
+	fi
+	mkdir -p "$(dirname "$CONF_TOML")" || true
+	# Log the chosen config path for debugging
+	echo "$(date +%Y-%m-%d_%H:%M:%S) [init] using CONF_TOML=$CONF_TOML" >> /tmp/log/frps-init.log 2>/dev/null || true
+
+	# init runtime flags
+	local run_user run_group stdout_flag stderr_flag respawn_flag
+	run_user=$(uci_get_option init user "")
+	run_group=$(uci_get_option init group "")
+	stdout_flag=$(uci_get_option init stdout 1)
+	stderr_flag=$(uci_get_option init stderr 1)
+	respawn_flag=$(uci_get_option init respawn 1)
+
+	procd_open_instance
+	procd_set_param command "$PROG" -c "$CONF_TOML"
+	[ "$respawn_flag" = 1 ] && procd_set_param respawn 300 5 5
+	[ "$stdout_flag" = 1 ] && procd_set_param stdout 1
+	[ "$stderr_flag" = 1 ] && procd_set_param stderr 1
+	[ -n "$run_user" ] && procd_set_param user "$run_user"
+	[ -n "$run_group" ] && procd_set_param group "$run_group"
+	# Export env
+	uci -q show frps.init | sed -n "s/^frps.init.env='\(.*\)'/\1/p" | while read -r envline; do
+		[ -z "$envline" ] && continue
+		case "$envline" in *'='*) procd_set_param env "$envline" ;; esac
+	done
+	procd_close_instance
+
+	add_firewall
+}
+
+stop_service() {
+	# Safety: avoid accidentally deleting root-level '.toml'
+	if [ -f "$CONF_TOML" ] && [ "$(basename "$CONF_TOML")" != ".toml" ]; then
+		rm -f "$CONF_TOML"
+	fi
+	del_firewall
+}
+
+reload_service() {
+	stop
+	start
+}
+
+# qa_example: illustrative snippet of frps.toml (manual debug aid)
+qa_example() {
+	cat <<'EOF'
+# Example frps.toml snippet
+bindPort = 7000
+quicBindPort = 7000
+allowPorts = [
+  { start = 2000, end = 2005 },
+  { single = 8080 },
+]
+transport.tls.force = true
+webServer.port = 7500
+auth.method = "token"
+auth.token = "SECRET"
+EOF
+}
+
+# ---------------- Firewall helper (optional) ----------------
+# Behavior controlled by UCI keys in 'common' section:
+#   set_firewall: no|check|force (default: no)
+#   tcp_ports: "7000,8000-8005" (comma separated single or ranges)
+#   udp_ports: similar format
+# Modes:
+#   no     -> do nothing
+#   check  -> create/update rules only if changed
+#   force  -> always create on start, delete on stop
+
+add_firewall() {
+	local set_firewall tcp_ports udp_ports
+	set_firewall=$(uci -q get frps.common.set_firewall 2>/dev/null)
+	tcp_ports=$(uci -q get frps.common.tcp_ports 2>/dev/null)
+	udp_ports=$(uci -q get frps.common.udp_ports 2>/dev/null)
+	[ -z "$set_firewall" ] && return 0
+	[ "$set_firewall" = "no" ] && return 0
+
+	local update_tcp=0 update_udp=0 existing
+	if [ -n "$tcp_ports" ]; then
+		existing=$(uci -q get firewall.frps_t_auto.dest_port 2>/dev/null)
+		if [ "$set_firewall" = "force" ] || [ "$existing" != "$tcp_ports" ]; then
+			update_tcp=1
+		fi
+		if [ $update_tcp -eq 1 ]; then
+			uci -q delete firewall.frps_t_auto
+			uci set firewall.frps_t_auto=rule
+			uci set firewall.frps_t_auto.name='frps_t_auto'
+			uci set firewall.frps_t_auto.src='wan'
+			uci set firewall.frps_t_auto.target='ACCEPT'
+			uci set firewall.frps_t_auto.proto='tcp'
+			uci set firewall.frps_t_auto.dest_port="$tcp_ports"
+			uci set firewall.frps_t_auto.enabled='1'
+		fi
+	fi
+
+	if [ -n "$udp_ports" ]; then
+		existing=$(uci -q get firewall.frps_u_auto.dest_port 2>/dev/null)
+		if [ "$set_firewall" = "force" ] || [ "$existing" != "$udp_ports" ]; then
+			update_udp=1
+		fi
+		if [ $update_udp -eq 1 ]; then
+			uci -q delete firewall.frps_u_auto
+			uci set firewall.frps_u_auto=rule
+			uci set firewall.frps_u_auto.name='frps_u_auto'
+			uci set firewall.frps_u_auto.src='wan'
+			uci set firewall.frps_u_auto.target='ACCEPT'
+			uci set firewall.frps_u_auto.proto='udp'
+			uci set firewall.frps_u_auto.dest_port="$udp_ports"
+			uci set firewall.frps_u_auto.enabled='1'
+		fi
+	fi
+
+	if [ $update_tcp -eq 1 ] || [ $update_udp -eq 1 ]; then
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+
+del_firewall() {
+	local set_firewall
+	set_firewall=$(uci -q get frps.common.set_firewall 2>/dev/null)
+	[ "$set_firewall" = "force" ] || return 0
+	local changed=0
+	if uci -q get firewall.frps_t_auto >/dev/null 2>&1; then
+		uci -q delete firewall.frps_t_auto
+		changed=1
+	fi
+	if uci -q get firewall.frps_u_auto >/dev/null 2>&1; then
+		uci -q delete firewall.frps_u_auto
+		changed=1
+	fi
+	if [ $changed -eq 1 ]; then
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
