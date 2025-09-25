@@ -182,7 +182,29 @@ function renderStatus(isRunning) {
 
 // Exec frps init.d action
 function serviceAction(action) {
-	return fs.exec('/etc/init.d/frps', [ action ]).catch(function(e){ return { code: -1, stderr: (e && e.message) || '' }; });
+	// 先尝试使用 /etc/init.d/frps 命令
+	return fs.exec('/etc/init.d/frps', [ action ])
+		.then(function(res) {
+			if (res && typeof res === 'object') {
+				return res;
+			}
+			return { code: 0, stderr: '' };
+		})
+		.catch(function(e) {
+			console.warn('Direct init.d call failed, trying alternative:', e);
+			// 如果直接调用失败，尝试使用 service 命令
+			return fs.exec('service', [ 'frps', action ])
+				.then(function(res) {
+					if (res && typeof res === 'object') {
+						return res;
+					}
+					return { code: 0, stderr: '' };
+				})
+				.catch(function(e2) {
+					console.error('Both service commands failed:', e, e2);
+					return { code: -1, stderr: '服务控制失败：' + (e2 && e2.message || '没有权限或命令不存在') };
+				});
+		});
 }
 
 function fmtNow() {
@@ -222,7 +244,7 @@ return view.extend({
 				E('fieldset', { class: 'cbi-section'}, [
 					E('p', { id: 'service_status' }, _('Collecting data ...')),
 					E('div', { class: 'cbi-section-actions' }, [
-						E('button', { class: 'btn cbi-button-action', click: function(){ serviceAction('start').then(function(res){ updateActionStatus('start', res); }).then(refresh); } }, _('Start now')),
+						E('button', { class: 'btn cbi-button-action', click: function(){ serviceAction('start').then(function(res){ updateActionStatus('start', res); }).then(refresh); } }, _('Start')),
 						E('button', { class: 'btn cbi-button-reset', click: function(){ serviceAction('stop').then(function(res){ updateActionStatus('stop', res); }).then(refresh); } }, _('Stop')),
 						E('button', { class: 'btn cbi-button-reload', click: function(){ serviceAction('restart').then(function(res){ updateActionStatus('restart', res); }).then(refresh); } }, _('Restart'))
 					]),
