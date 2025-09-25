@@ -121,20 +121,53 @@ function setParams(o, params) {
 	}
 }
 
+function isIgnorableUciDeleteError(err) {
+	if (!err)
+		return false;
+	var msg = '';
+	if (err.message)
+		msg = err.message;
+	else if (typeof err === 'string')
+		msg = err;
+	else
+		msg = '' + err;
+	return (msg.indexOf('uci/delete') !== -1) && (msg.indexOf('Not found') !== -1 || msg.indexOf('code 4') !== -1);
+}
+
+function swallowUciDelete(promise) {
+	return Promise.resolve(promise).catch(function(err) {
+		if (isIgnorableUciDeleteError(err)) {
+			console.warn('Ignoring benign UCI delete failure:', err);
+			return null;
+		}
+		throw err;
+	});
+}
+
 function defTabOpts(s, t, opts, params) {
 	for (var i = 0; i < opts.length; i++) {
 		var opt = opts[i];
 		var o = s.taboption(t, opt[0], opt[1], opt[2], opt[3]);
 		setParams(o, opt[4]);
 		setParams(o, params);
-		// DynamicList delete guard: ignore delete if option not present in UCI (avoid ubus code 4)
-		if (o instanceof form.DynamicList) {
+		if (typeof o.remove === 'function') {
 			(function(orig) {
 				o.remove = function(section_id) {
-					var cur = this.map.data.get(this.map.config, section_id, this.option);
-					if (cur == null)
-						return Promise.resolve();
-					return orig.apply(this, arguments);
+					if (this.option) {
+						var cur = this.map.data.get(this.map.config, section_id, this.option);
+						if (cur == null)
+							return Promise.resolve();
+					}
+					var res = orig.apply(this, arguments);
+					return Promise.resolve(res).catch(function(err) {
+						var msg = err && err.message ? err.message : err;
+						if (msg) {
+							var text = '' + msg;
+							if (text.indexOf('uci/delete') !== -1 || text.indexOf('Not found') !== -1 || text.indexOf('code 4') !== -1)
+								return Promise.resolve();
+						}
+						throw err;
+					});
 				};
 			})(o.remove);
 		}
@@ -147,6 +180,27 @@ function defOpts(s, opts, params) {
 		var o = s.option(opt[0], opt[1], opt[2], opt[3]);
 		setParams(o, opt[4]);
 		setParams(o, params);
+		if (typeof o.remove === 'function') {
+			(function(orig) {
+				o.remove = function(section_id) {
+					if (this.option) {
+						var cur = this.map.data.get(this.map.config, section_id, this.option);
+						if (cur == null)
+							return Promise.resolve();
+					}
+					var res = orig.apply(this, arguments);
+					return Promise.resolve(res).catch(function(err) {
+						var msg = err && err.message ? err.message : err;
+						if (msg) {
+							var text = '' + msg;
+							if (text.indexOf('uci/delete') !== -1 || text.indexOf('Not found') !== -1 || text.indexOf('code 4') !== -1)
+								return Promise.resolve();
+						}
+						throw err;
+					});
+				};
+			})(o.remove);
+		}
 	}
 }
 
@@ -295,10 +349,15 @@ return view.extend({
 		return m.render();
 	}
 ,
+	// Suppress harmless "uci/delete code 4" errors during save cycles
+	handleSave: function(ev) {
+		return swallowUciDelete(this.super('handleSave', ev));
+	},
+
 	// Restart frps after Save & Apply to apply new config immediately
 	handleSaveApply: function(ev) {
 		var self = this;
-		return this.super('handleSaveApply', ev).then(function(res) {
+		return swallowUciDelete(this.super('handleSaveApply', ev)).then(function(res) {
 			return fs.exec('/etc/init.d/frps', [ 'restart' ]).catch(function(e){ return null; }).then(function(){ return res; });
 		});
 	}
