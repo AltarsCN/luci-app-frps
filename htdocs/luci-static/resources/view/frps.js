@@ -17,7 +17,7 @@ var startupConf = [
 	[form.DynamicList, 'conf_inc', _('Additional configs'), _('Config files include in temporary config file'), {placeholder: '/etc/frp/frps.d/frps_full.ini'}]
 ];
 
-// 分页拆分
+// Pagination split
 var grpBasic = [
 	[form.Value, 'bind_addr', _('Bind address'), _('BindAddr specifies the address that the server binds to.<br />By default, this value is "0.0.0.0".'), {datatype: 'ipaddr'}],
 	[form.Value, 'bind_port', _('Bind port'), _('BindPort specifies the port that the server listens on.<br />By default, this value is 7000.'), {datatype: 'port'}],
@@ -236,7 +236,7 @@ function renderStatus(isRunning) {
 
 // Exec frps init.d action
 function serviceAction(action) {
-	// 先尝试使用 /etc/init.d/frps 命令
+	// Try using the /etc/init.d/frps command first
 	return fs.exec('/etc/init.d/frps', [ action ])
 		.then(function(res) {
 			if (res && typeof res === 'object') {
@@ -246,7 +246,7 @@ function serviceAction(action) {
 		})
 		.catch(function(e) {
 			console.warn('Direct init.d call failed, trying alternative:', e);
-			// 如果直接调用失败，尝试使用 service 命令
+			// If direct call fails, try using the 'service' command
 			return fs.exec('service', [ 'frps', action ])
 				.then(function(res) {
 					if (res && typeof res === 'object') {
@@ -256,7 +256,7 @@ function serviceAction(action) {
 				})
 				.catch(function(e2) {
 					console.error('Both service commands failed:', e, e2);
-					return { code: -1, stderr: '服务控制失败：' + (e2 && e2.message || '没有权限或命令不存在') };
+					return { code: -1, stderr: 'Service control failed: ' + (e2 && e2.message || 'permission denied or command not found') };
 				});
 		});
 }
