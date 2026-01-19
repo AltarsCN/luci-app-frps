@@ -12,11 +12,15 @@ PKG_LICENSE:=Apache-2.0
 # 使用 preinst 脚本在安装前删除这些冲突文件
 define Package/luci-app-frps/preinst
 #!/bin/sh
-[ -n "$${IPKG_INSTROOT}" ] || {
-	# 运行时安装：删除可能由 frps 包安装的冲突文件
+# 构建时安装：删除 staging 目录中的冲突文件
+if [ -n "$${IPKG_INSTROOT}" ]; then
+	rm -f "$${IPKG_INSTROOT}/etc/config/frps" 2>/dev/null
+	rm -f "$${IPKG_INSTROOT}/etc/init.d/frps" 2>/dev/null
+else
+	# 运行时安装：删除目标系统中的冲突文件
 	rm -f /etc/config/frps 2>/dev/null
 	rm -f /etc/init.d/frps 2>/dev/null
-}
+fi
 exit 0
 endef
 
