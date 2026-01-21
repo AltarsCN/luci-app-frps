@@ -7,13 +7,14 @@
 				"/etc/passwd": [ "read" ]
 			},
 			"ubus": {
-				"service": [ "list" ]
+				"service": [ "list" ],
+				"rc": [ "list" ]
 			},
 			"uci": ["frps"]
 		},
 		"write": {
-			"file": {
-				"/etc/init.d/frps": [ "exec" ]
+			"ubus": {
+				"rc": [ "init" ]
 			},
 			"uci": ["frps"]
 		}

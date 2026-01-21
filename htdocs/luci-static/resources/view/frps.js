@@ -234,31 +234,21 @@ function renderStatus(isRunning) {
 	return renderHTML;
 }
 
-// Exec frps init.d action
+var callRcInit = rpc.declare({
+	object: 'rc',
+	method: 'init',
+	params: [ 'name', 'action' ]
+});
+
+// Exec frps init.d action via rc ubus interface
 function serviceAction(action) {
-	// 先尝试使用 /etc/init.d/frps 命令
-	return fs.exec('/etc/init.d/frps', [ action ])
-		.then(function(res) {
-			if (res && typeof res === 'object') {
-				return res;
-			}
-			return { code: 0, stderr: '' };
-		})
-		.catch(function(e) {
-			console.warn('Direct init.d call failed, trying alternative:', e);
-			// 如果直接调用失败，尝试使用 service 命令
-			return fs.exec('service', [ 'frps', action ])
-				.then(function(res) {
-					if (res && typeof res === 'object') {
-						return res;
-					}
-					return { code: 0, stderr: '' };
-				})
-				.catch(function(e2) {
-					console.error('Both service commands failed:', e, e2);
-					return { code: -1, stderr: '服务控制失败：' + (e2 && e2.message || '没有权限或命令不存在') };
-				});
-		});
+	return callRcInit('frps', action).then(function() {
+		// Success: rc.init returns empty object on success
+		return { code: 0, stderr: '' };
+	}).catch(function(e) {
+		console.error('Service action failed:', e);
+		return { code: -1, stderr: (e && e.message) || 'Unknown error' };
+	});
 }
 
 function fmtNow() {
@@ -358,7 +348,7 @@ return view.extend({
 	handleSaveApply: function(ev) {
 		var self = this;
 		return swallowUciDelete(this.super('handleSaveApply', ev)).then(function(res) {
-			return fs.exec('/etc/init.d/frps', [ 'restart' ]).catch(function(e){ return null; }).then(function(){ return res; });
+			return callRcInit('frps', 'restart').catch(function(e){ return null; }).then(function(){ return res; });
 		});
 	}
 });

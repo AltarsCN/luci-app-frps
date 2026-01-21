@@ -24,6 +24,18 @@ fi
 exit 0
 endef
 
+define Package/luci-app-frps/postinst
+#!/bin/sh
+# 确保 init.d 脚本有执行权限
+if [ -n "$${IPKG_INSTROOT}" ]; then
+	chmod +x "$${IPKG_INSTROOT}/etc/init.d/frps" 2>/dev/null
+else
+	chmod +x /etc/init.d/frps 2>/dev/null
+	/etc/init.d/frps enabled && /etc/init.d/frps restart
+fi
+exit 0
+endef
+
 define Package/luci-app-frps/postrm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] || {
