@@ -4,14 +4,7 @@
 		"read": {
 			"file": {
 				"/etc/group": [ "read" ],
-				"/etc/passwd": [ "read" ],
-				"/etc/init.d/frps *": [ "exec" ],
-				"/etc/init.d/frps start": [ "exec" ],
-				"/etc/init.d/frps stop": [ "exec" ],
-				"/etc/init.d/frps restart": [ "exec" ],
-				"/etc/init.d/frps reload": [ "exec" ],
-				"/etc/init.d/frps enable": [ "exec" ],
-				"/etc/init.d/frps disable": [ "exec" ]
+				"/etc/passwd": [ "read" ]
 			},
 			"ubus": {
 				"service": [ "list" ]
@@ -19,6 +12,9 @@
 			"uci": ["frps"]
 		},
 		"write": {
+			"file": {
+				"/etc/init.d/frps": [ "exec" ]
+			},
 			"uci": ["frps"]
 		}
 	}
